@@ -11,6 +11,8 @@ export const enum Tile {
   Tree,
   Lamp,
   Crate,
+  /** Drôtený plot po obvode mapy: nedá sa prejsť, ale svetlo cez pletivo presvieti. */
+  Fence,
 }
 
 /** Mesto: mriežka políčok, autá a budovy blokujú pohyb aj svetlo. */
@@ -24,7 +26,14 @@ export interface CityMap {
   spawn: { x: number; y: number };
 }
 
-const SOLID = new Set<Tile>([Tile.Building, Tile.Car, Tile.Tree, Tile.Lamp, Tile.Crate]);
+const SOLID = new Set<Tile>([
+  Tile.Building,
+  Tile.Car,
+  Tile.Tree,
+  Tile.Lamp,
+  Tile.Crate,
+  Tile.Fence,
+]);
 const OPAQUE = new Set<Tile>([Tile.Building, Tile.Car, Tile.Crate]);
 
 export const tileAt = (map: CityMap, tx: number, ty: number): Tile =>
@@ -38,7 +47,8 @@ export const isSolid = (map: CityMap, tx: number, ty: number): boolean =>
 
 /** Políčko, ktoré zastaví svetlo baterky (budovy, autá, debny — nie stromy a lampy). */
 export const isOpaque = (map: CityMap, tx: number, ty: number): boolean =>
-  OPAQUE.has(tileAt(map, tx, ty));
+  // Za plotom je otvorená krajina — svetlo pokračuje aj mimo mapy.
+  tx >= 0 && ty >= 0 && tx < map.width && ty < map.height && OPAQUE.has(tileAt(map, tx, ty));
 
 const BLOCK = 13;
 const STREET = 4;
@@ -139,6 +149,16 @@ export function generateCity(seed: number, blocksX = 5, blocksY = 4): CityMap {
     const color = randomInt(rng, 0, 4) | (horizontal ? 0x10 : 0);
     set(x, y, Tile.Car, color);
     set(x2, y2, Tile.Car, color | 0x20);
+  }
+
+  // Plot po obvode (namiesto neviditeľnej steny na okraji mapy).
+  for (let x = 0; x < width; x++) {
+    set(x, 0, Tile.Fence);
+    set(x, height - 1, Tile.Fence);
+  }
+  for (let y = 0; y < height; y++) {
+    set(0, y, Tile.Fence);
+    set(width - 1, y, Tile.Fence);
   }
 
   // Štart: stred mapy na najbližšej voľnej ceste.

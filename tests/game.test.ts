@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FlowField, UNREACHABLE } from '@/game/flowfield';
 import { castRay, lineOfSight, moveCircle, visibilityFan } from '@/game/geometry';
 import { Game, waveComposition, type Input } from '@/game/game';
-import { generateCity, isSolid, Tile, TILE, tileAt } from '@/game/map';
+import { generateCity, isOpaque, isSolid, Tile, TILE, tileAt } from '@/game/map';
 
 const idle: Input = {
   moveX: 0,
@@ -34,10 +34,17 @@ describe('mesto', () => {
     expect(a.lamps.length).toBeGreaterThan(5);
   });
 
-  it('okraj mapy je stena', () => {
+  it('okolo mapy je plot: nedá sa prejsť, ale svetlo presvieti von', () => {
     const map = generateCity(1);
-    expect(tileAt(map, -1, 0)).toBe(Tile.Building);
+    for (let x = 0; x < map.width; x++) {
+      expect(tileAt(map, x, 0)).toBe(Tile.Fence);
+      expect(tileAt(map, x, map.height - 1)).toBe(Tile.Fence);
+    }
+    for (let y = 0; y < map.height; y++) expect(tileAt(map, 0, y)).toBe(Tile.Fence);
+    expect(isSolid(map, 0, 5)).toBe(true);
     expect(isSolid(map, map.width, 3)).toBe(true);
+    expect(isOpaque(map, 0, 5)).toBe(false);
+    expect(isOpaque(map, -3, 5)).toBe(false);
   });
 });
 
@@ -46,8 +53,13 @@ describe('geometria', () => {
   const at = map.spawn;
 
   it('lúč sa zastaví o budovu a viditeľnosť je polygón', () => {
-    const d = castRay(map, at.x, at.y, 1, 0, 2000);
-    expect(d).toBeLessThan(2000);
+    // Pevná prekážka (najneskôr plot) zastaví lúč v každom smere.
+    expect(castRay(map, at.x, at.y, 1, 0, 2000, isSolid)).toBeLessThan(2000);
+    // Svetlo cez plot presvieti von, budovy ho však zastavia v niektorom smere.
+    const light = [0, 1, 2, 3].map((k) =>
+      castRay(map, at.x, at.y, Math.cos((k * Math.PI) / 2), Math.sin((k * Math.PI) / 2), 2000),
+    );
+    expect(Math.min(...light)).toBeLessThan(2000);
     const fan = visibilityFan(map, at.x, at.y, 150, 0, Math.PI / 3, 20);
     expect(fan.length).toBe(2 + 21 * 2);
     expect(lineOfSight(map, at, at)).toBe(true);

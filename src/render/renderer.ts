@@ -17,6 +17,7 @@ import {
   drawCorpse,
   drawDot,
   drawGround,
+  drawOutskirts,
   drawPickup,
   drawPlayer,
   drawProps,
@@ -144,6 +145,9 @@ export class Renderer {
     light.source.scaleMode = 'linear';
     this.tex.light = light;
 
+    const margin = 12;
+    const outskirts = new Sprite(texture(drawOutskirts(map, margin)));
+    outskirts.position.set(-margin * 16, -margin * 16);
     const ground = new Sprite(texture(drawGround(map)));
     const props = new Sprite(texture(drawProps(map)));
     // Strechy nad tmou, stlmené ako v mesačnom svetle — mesto je čitateľné aj v tme.
@@ -180,6 +184,7 @@ export class Renderer {
     this.lightRoot.addChild(this.lightGfx);
     this.flashRoot.addChild(this.lightSprites);
     this.world.addChild(
+      outskirts,
       ground,
       new Sprite(this.decals),
       props,

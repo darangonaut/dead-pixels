@@ -1,7 +1,9 @@
 import { FlowField } from './flowfield';
 import { castRay, lineOfSight, moveCircle, type Vec } from './geometry';
 import {
+  FINAL_LEVEL,
   generateLevel,
+  isOpaque,
   isSolid,
   setGate,
   Tile,
@@ -14,7 +16,7 @@ import { createRng } from './rng';
 import { SpatialHash } from './spatial';
 import { WEAPON_ORDER, WEAPONS, type WeaponId } from './weapons';
 
-export type ZombieKind = 'walker' | 'runner' | 'brute';
+export type ZombieKind = 'walker' | 'runner' | 'brute' | 'exploder' | 'spitter' | 'boss';
 
 export interface Zombie {
   id: number;
@@ -36,6 +38,23 @@ export interface Zombie {
   /** Úsek, v ktorom vznikla (pri návrate na kontrolný bod sa zruší). */
   room: number;
   wander: number;
+  maxHp: number;
+  /** Odpočet schopnosti (pľuvanec, útok bossa) (s). */
+  timer: number;
+  /** Boss: príprava, rozbeh alebo omráčenie po náraze do steny. */
+  state: 'normal' | 'windup' | 'charge' | 'stunned';
+  stateTime: number;
+  dirX: number;
+  dirY: number;
+}
+
+/** Pľuvanec kyseliny (pľujúca zombie). */
+export interface Spit {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
 }
 
 export interface Pickup {
@@ -98,7 +117,13 @@ export type GameEvent =
   | { type: 'gate'; gate: number; open: boolean }
   | { type: 'died'; lives: number }
   | { type: 'respawn' }
-  | { type: 'levelComplete'; level: number }
+  | { type: 'levelComplete'; level: number; final: boolean }
+  | { type: 'explode'; x: number; y: number }
+  | { type: 'spit'; x: number; y: number }
+  | { type: 'splash'; x: number; y: number }
+  | { type: 'boss'; room: number }
+  | { type: 'bossWindup'; x: number; y: number }
+  | { type: 'bossStun'; x: number; y: number }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
@@ -114,14 +139,29 @@ export const ZOMBIES: Readonly<
   walker: { hp: 3, speed: 24, damage: 10, score: 10, radius: ZOMBIE_RADIUS },
   runner: { hp: 2, speed: 58, damage: 7, score: 15, radius: ZOMBIE_RADIUS - 1 },
   brute: { hp: 14, speed: 18, damage: 25, score: 50, radius: ZOMBIE_RADIUS + 3 },
+  exploder: { hp: 4, speed: 20, damage: 0, score: 25, radius: ZOMBIE_RADIUS + 2 },
+  spitter: { hp: 3, speed: 30, damage: 6, score: 25, radius: ZOMBIE_RADIUS },
+  boss: { hp: 160, speed: 26, damage: 35, score: 1000, radius: ZOMBIE_RADIUS + 6 },
 };
+
+const EXPLOSION_RADIUS = 44;
+const SPIT_SPEED = 110;
 
 /** Zloženie hordy v úseku podľa úrovne. */
 export function hordeComposition(level: number): Record<ZombieKind, number> {
   const total = 10 + level * 4;
   const runners = Math.floor(total * Math.min(0.45, 0.1 + level * 0.07));
   const brutes = level >= 2 ? Math.floor(level / 2) : 0;
-  return { walker: total - runners - brutes, runner: runners, brute: brutes };
+  const exploders = level >= 3 ? Math.floor((level - 1) / 2) : 0;
+  const spitters = level >= 5 ? Math.floor((level - 3) / 2) : 0;
+  return {
+    walker: total - runners - brutes - exploders - spitters,
+    runner: runners,
+    brute: brutes,
+    exploder: exploders,
+    spitter: spitters,
+    boss: 0,
+  };
 }
 
 /**
@@ -134,6 +174,7 @@ export class Game {
   readonly level: number;
   zombies: Zombie[] = [];
   pickups: Pickup[] = [];
+  spits: Spit[] = [];
   readonly flow: FlowField;
   score: number;
   kills: number;
@@ -235,6 +276,7 @@ export class Game {
     }
     this.updateHorde(dt);
     this.updateZombies(dt);
+    this.updateSpits(dt);
     this.updatePickups(dt);
     // Cieľ: heliport.
     const exit = this.map.exit;
@@ -243,7 +285,11 @@ export class Game {
       Math.hypot(this.player.x - exit.x, this.player.y - exit.y) < 26
     ) {
       this.complete = true;
-      this.events.push({ type: 'levelComplete', level: this.level });
+      this.events.push({
+        type: 'levelComplete',
+        level: this.level,
+        final: this.level === FINAL_LEVEL,
+      });
     }
   }
 
@@ -330,8 +376,11 @@ export class Game {
       best.hp -= damage;
       best.stagger = 0.12;
       best.aware = true;
-      best.vx += dx * knockback * 20;
-      best.vy += dy * knockback * 20;
+      // Obri a boss sa takmer neodhodia.
+      const resist = best.kind === 'boss' ? 0.08 : best.kind === 'brute' ? 0.4 : 1;
+      best.vx += dx * knockback * 20 * resist;
+      best.vy += dy * knockback * 20 * resist;
+      if (best.kind === 'boss') best.stagger = 0;
       if (best.hp <= 0) this.killZombie(best, angle);
       else this.events.push({ type: 'hit', x: best.x, y: best.y, angle, kind: best.kind });
     }
@@ -343,8 +392,43 @@ export class Game {
     this.kills++;
     this.score += ZOMBIES[z.kind].score * this.level;
     this.events.push({ type: 'kill', x: z.x, y: z.y, angle, kind: z.kind });
-    const dropChance = z.kind === 'brute' ? 1 : 0.07;
+    if (z.kind === 'exploder') this.explode(z.x, z.y);
+    const dropChance = z.kind === 'brute' || z.kind === 'boss' ? 1 : 0.07;
     if (this.rng() < dropChance) this.drop(z.x, z.y);
+    if (z.kind === 'boss') {
+      this.drop(z.x + 10, z.y);
+      this.drop(z.x - 10, z.y);
+    }
+  }
+
+  /** Výbuch nafúknutej zombie: zraní hráča aj ostatné zombie v okolí (aj reťazovo). */
+  private explode(x: number, y: number): void {
+    this.events.push({ type: 'explode', x, y });
+    const p = this.player;
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < EXPLOSION_RADIUS && this.respawn <= 0)
+      this.damagePlayer(Math.round(40 * (1 - d / (EXPLOSION_RADIUS * 1.3))));
+    for (const z of [...this.zombies]) {
+      const dz = Math.hypot(z.x - x, z.y - y);
+      if (dz >= EXPLOSION_RADIUS || z.hp <= 0) continue;
+      z.hp -= z.kind === 'boss' ? 8 : 5;
+      z.aware = true;
+      z.vx += ((z.x - x) / (dz || 1)) * 120;
+      z.vy += ((z.y - y) / (dz || 1)) * 120;
+      if (z.hp <= 0) this.killZombie(z, Math.atan2(z.y - y, z.x - x));
+    }
+  }
+
+  private damagePlayer(amount: number): void {
+    const p = this.player;
+    if (amount <= 0 || this.over || this.respawn > 0) return;
+    p.hp -= amount;
+    p.hurt = 0.35;
+    this.events.push({ type: 'hurt', x: p.x, y: p.y });
+    if (p.hp <= 0) {
+      p.hp = 0;
+      this.die();
+    }
   }
 
   private drop(x: number, y: number): void {
@@ -392,19 +476,33 @@ export class Game {
       const z = this.spawnZombie(r.kind, r.x, r.y, room.index);
       z.aware = false;
     }
-    if (room.encounter === 'horde' && !this.cleared.has(room.index)) {
+    if (
+      (room.encounter === 'horde' || room.encounter === 'boss') &&
+      !this.cleared.has(room.index)
+    ) {
       if (room.doorIn !== null) this.setGate(room.doorIn, false);
-      const comp = hordeComposition(this.level);
+      const comp: Record<ZombieKind, number> =
+        room.encounter === 'boss'
+          ? { walker: 4 + this.level, runner: 2, brute: 0, exploder: 1, spitter: 0, boss: 0 }
+          : hordeComposition(this.level);
       this.hordeQueue = [];
-      for (const kind of ['walker', 'runner', 'brute'] as const)
+      for (const kind of ['walker', 'runner', 'brute', 'exploder', 'spitter'] as const)
         for (let i = 0; i < comp[kind]; i++) this.hordeQueue.push(kind);
+      if (room.encounter === 'boss') {
+        const at = this.spawnPoint(room) ?? {
+          x: (room.x0 + room.x1) * 8,
+          y: (room.y0 + room.y1) * 8,
+        };
+        this.spawnZombie('boss', at.x, at.y, room.index).aware = true;
+        this.events.push({ type: 'boss', room: room.index });
+      }
       for (let i = this.hordeQueue.length - 1; i > 0; i--) {
         const j = Math.floor(this.rng() * (i + 1));
         [this.hordeQueue[i], this.hordeQueue[j]] = [this.hordeQueue[j]!, this.hordeQueue[i]!];
       }
       this.hordeRoom = room.index;
       this.spawnTimer = 1;
-      this.events.push({ type: 'horde', room: room.index });
+      if (room.encounter === 'horde') this.events.push({ type: 'horde', room: room.index });
     }
   }
 
@@ -473,7 +571,15 @@ export class Game {
       aware: true,
       room,
       wander: 0,
+      maxHp: 0,
+      timer: 1 + this.rng() * 2,
+      state: 'normal',
+      stateTime: 0,
+      dirX: 0,
+      dirY: 0,
     };
+    if (kind === 'boss') z.hp = ZOMBIES.boss.hp + this.level * 12;
+    z.maxHp = z.hp;
     this.zombies.push(z);
     return z;
   }
@@ -512,6 +618,7 @@ export class Game {
       }
     this.hordeQueue = [];
     this.hordeRoom = -1;
+    this.spits = [];
     this.room = -1;
     this.flow.targetTile = -1;
     this.updateRoom();
@@ -523,28 +630,91 @@ export class Game {
   private updateZombies(dt: number): void {
     const p = this.player;
     this.groanTimer -= dt;
-    for (const z of this.zombies) {
+    for (const z of [...this.zombies]) {
+      if (z.hp <= 0) continue;
       const def = ZOMBIES[z.kind];
       const toX = p.x - z.x;
       const toY = p.y - z.y;
-      const dist = Math.hypot(toX, toY);
-      if (!z.aware && dist < AWARE_RANGE && lineOfSight(this.map, z, p)) z.aware = true;
+      const dist = Math.hypot(toX, toY) || 0.001;
+      const sees = dist < 220 && lineOfSight(this.map, z, p);
+      if (!z.aware && dist < AWARE_RANGE && sees) z.aware = true;
       let ax = 0;
       let ay = 0;
       let speed = def.speed;
-      if (z.aware) {
+      z.timer -= dt;
+
+      if (z.kind === 'boss' && z.state !== 'normal') {
+        // Boss: nádych → rozbeh rovno za hráčom → omráčenie pri náraze do steny.
+        z.stateTime -= dt;
+        if (z.state === 'windup') {
+          speed = 0;
+          z.angle = Math.atan2(toY, toX);
+          z.dirX = toX / dist;
+          z.dirY = toY / dist;
+          if (z.stateTime <= 0) {
+            z.state = 'charge';
+            z.stateTime = 0.9;
+          }
+        } else if (z.state === 'charge') {
+          const before = { x: z.x, y: z.y };
+          moveCircle(this.map, z, def.radius, z.dirX * 160 * dt, z.dirY * 160 * dt);
+          const moved = Math.hypot(z.x - before.x, z.y - before.y);
+          if (dist < def.radius + PLAYER_RADIUS + 4 && p.hurt === 0) this.damagePlayer(def.damage);
+          if (moved < 160 * dt * 0.3) {
+            z.state = 'stunned';
+            z.stateTime = 1.4;
+            this.events.push({ type: 'bossStun', x: z.x, y: z.y });
+          } else if (z.stateTime <= 0) {
+            z.state = 'normal';
+            z.timer = 3;
+          }
+          z.step += dt * 6;
+          continue;
+        } else if (z.stateTime <= 0) {
+          z.state = 'normal';
+          z.timer = 2.5;
+        } else speed = 0;
+      }
+
+      if (z.aware && speed > 0) {
         // Blízko a na dohľad: rovno k hráčovi, inak po mape vzdialeností.
         let dir: Vec | null =
-          dist < 70 && lineOfSight(this.map, z, p)
-            ? { x: toX / dist, y: toY / dist }
-            : this.flow.direction(z.x, z.y);
-        if (!dir && dist > 0) dir = { x: toX / dist, y: toY / dist };
-        if (dir) {
-          ax = dir.x;
-          ay = dir.y;
-          z.angle = Math.atan2(dir.y, dir.x);
+          dist < 70 && sees ? { x: toX / dist, y: toY / dist } : this.flow.direction(z.x, z.y);
+        if (!dir) dir = { x: toX / dist, y: toY / dist };
+        ax = dir.x;
+        ay = dir.y;
+        z.angle = Math.atan2(sees ? toY : dir.y, sees ? toX : dir.x);
+        if (z.kind === 'spitter' && sees && dist < 170) {
+          // Pľujúca si drží odstup a krúži okolo hráča.
+          const side = z.id % 2 === 0 ? 1 : -1;
+          if (dist < 75) {
+            ax = -toX / dist;
+            ay = -toY / dist;
+          } else if (dist < 130) {
+            ax = (-toY / dist) * side;
+            ay = (toX / dist) * side;
+            speed *= 0.6;
+          }
+          if (z.timer <= 0) {
+            z.timer = 2.2;
+            // Mieri na hráča s malým rozptylom — dá sa uhnúť.
+            const a = Math.atan2(p.y - z.y, p.x - z.x) + (this.rng() - 0.5) * 0.15;
+            this.spits.push({
+              x: z.x,
+              y: z.y,
+              vx: Math.cos(a) * SPIT_SPEED,
+              vy: Math.sin(a) * SPIT_SPEED,
+              life: 2.5,
+            });
+            this.events.push({ type: 'spit', x: z.x, y: z.y });
+          }
         }
-      } else {
+        if (z.kind === 'boss' && z.state === 'normal' && sees && dist < 190 && z.timer <= 0) {
+          z.state = 'windup';
+          z.stateTime = 0.7;
+          this.events.push({ type: 'bossWindup', x: z.x, y: z.y });
+        }
+      } else if (!z.aware) {
         // Túlanie: pomaly jedným smerom, občas zmena.
         z.wander -= dt;
         if (z.wander <= 0) {
@@ -556,7 +726,7 @@ export class Game {
         speed *= 0.35;
       }
       // Oddeľovanie od ostatných (horda sa rozprestrie).
-      for (const o of this.hash.near(z.x, z.y, 14, this.nearby)) {
+      for (const o of this.hash.near(z.x, z.y, 18, this.nearby)) {
         if (o === z) continue;
         const ox = z.x - o.x;
         const oy = z.y - o.y;
@@ -574,20 +744,20 @@ export class Game {
       moveCircle(this.map, z, def.radius, (ax * speed + z.vx) * dt, (ay * speed + z.vy) * dt);
       z.step += dt * speed * 0.25;
 
-      // Útok.
+      // Útok: nafúknutá pri hráčovi vybuchne, ostatné udierajú.
       z.cooldown = Math.max(0, z.cooldown - dt);
-      if (dist < def.radius + PLAYER_RADIUS + 2 && z.cooldown === 0 && this.respawn <= 0) {
+      const reach = def.radius + PLAYER_RADIUS + 2;
+      if (z.kind === 'exploder' && dist < reach + 4 && this.respawn <= 0) {
+        this.killZombie(z, Math.atan2(toY, toX));
+        if (this.respawn > 0 || this.over) return;
+        continue;
+      }
+      if (dist < reach && z.cooldown === 0 && this.respawn <= 0) {
         z.cooldown = 0.8;
         z.aware = true;
         if (p.hurt === 0) {
-          p.hp -= def.damage;
-          p.hurt = 0.35;
-          this.events.push({ type: 'hurt', x: p.x, y: p.y });
-          if (p.hp <= 0) {
-            p.hp = 0;
-            this.die();
-            return;
-          }
+          this.damagePlayer(def.damage);
+          if (this.respawn > 0 || this.over) return;
         }
       }
       if (this.groanTimer <= 0 && dist < 220 && this.rng() < 0.05) {
@@ -595,6 +765,28 @@ export class Game {
         this.events.push({ type: 'groan', x: z.x, y: z.y, kind: z.kind });
       }
     }
+  }
+
+  /** Pľuvance letia rovno, zastaví ich stena alebo hráč. */
+  private updateSpits(dt: number): void {
+    const p = this.player;
+    this.spits = this.spits.filter((s) => {
+      s.life -= dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      const tx = Math.floor(s.x / TILE);
+      const ty = Math.floor(s.y / TILE);
+      if (s.life <= 0 || isOpaque(this.map, tx, ty) || tileAt(this.map, tx, ty) === Tile.Building) {
+        this.events.push({ type: 'splash', x: s.x, y: s.y });
+        return false;
+      }
+      if (Math.hypot(s.x - p.x, s.y - p.y) < PLAYER_RADIUS + 3 && this.respawn <= 0) {
+        if (p.hurt === 0) this.damagePlayer(12);
+        this.events.push({ type: 'splash', x: s.x, y: s.y });
+        return false;
+      }
+      return true;
+    });
   }
 
   // --- Predmety ---
@@ -624,6 +816,11 @@ export class Game {
 
   get maxHp(): number {
     return MAX_HP;
+  }
+
+  /** Boss v aktívnom úseku (pre ukazovateľ života), inak null. */
+  get boss(): Zombie | null {
+    return this.zombies.find((z) => z.kind === 'boss') ?? null;
   }
 
   /** Zombie zostávajúce v aktívnej horde (na scéne + čakajúce), inak null. */

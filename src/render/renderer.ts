@@ -20,7 +20,11 @@ import {
   drawGate,
   drawGround,
   drawPickup,
+  drawHelicopter,
   drawPlayer,
+  drawRotor,
+  drawScorch,
+  drawSpit,
   drawProps,
   drawRoofs,
   drawZombie,
@@ -101,6 +105,9 @@ export class Renderer {
     spark: Texture.EMPTY,
     shell: Texture.EMPTY,
     light: Texture.EMPTY,
+    spit: Texture.EMPTY,
+    acid: Texture.EMPTY,
+    scorch: Texture.EMPTY,
   };
   private zombieSprites = new Map<number, Sprite>();
   private pickupSprites = new Map<number, Sprite>();
@@ -120,6 +127,9 @@ export class Renderer {
   private gateSprites: Sprite[] = [];
   private arrow = new Sprite();
   private beacon = new Sprite();
+  private heli = new Container();
+  private rotor: Sprite | null = null;
+  private spitSprites: Sprite[] = [];
 
   constructor(private readonly game: Game) {}
 
@@ -136,7 +146,7 @@ export class Renderer {
     const map = this.game.map;
 
     this.tex.blood = Array.from({ length: 6 }, (_, i) => texture(drawBlood(i)));
-    for (const kind of ['walker', 'runner', 'brute'] as const) {
+    for (const kind of ['walker', 'runner', 'brute', 'exploder', 'spitter', 'boss'] as const) {
       this.tex.corpse.set(kind, texture(drawCorpse(kind)));
       for (const f of [0, 1]) this.tex.zombie.set(`${kind}${f}`, texture(drawZombie(kind, f)));
     }
@@ -145,6 +155,9 @@ export class Renderer {
     this.tex.drop = texture(drawDot(C.blood));
     this.tex.spark = texture(drawDot(C.yellow, 1, 1));
     this.tex.shell = texture(drawDot(0xd8b04a, 2, 1));
+    this.tex.spit = texture(drawSpit());
+    this.tex.acid = texture(drawDot(0x7fd040));
+    this.tex.scorch = texture(drawScorch());
     const light = Texture.from(lightCanvas(128));
     light.source.scaleMode = 'linear';
     this.tex.light = light;
@@ -165,7 +178,9 @@ export class Renderer {
       glow.anchor.set(0.5);
       glow.position.set(l.x, l.y);
       glow.width = glow.height = 150;
-      glow.tint = 0xffc070;
+      // Farba svetla podľa štvrte: teplé lampy, studené žiarivky v nemocnici, zelenkasté metro.
+      glow.tint =
+        map.district === 'hospital' ? 0xc8e4ff : map.district === 'metro' ? 0xc8ffb0 : 0xffc070;
       glow.alpha = 0.12;
       glow.blendMode = 'add';
       this.glow.addChild(glow);
@@ -199,6 +214,17 @@ export class Renderer {
     this.beacon.position.set(map.exit.x, map.exit.y);
     this.beacon.width = this.beacon.height = 120;
     this.beacon.tint = 0xff3030;
+    if (this.game.level === 10) {
+      // Záverečná úroveň: na heliporte čaká vojenský vrtuľník.
+      const heli = new Sprite(texture(drawHelicopter()));
+      heli.anchor.set(0.35, 0.5);
+      heli.position.set(map.exit.x, map.exit.y);
+      heli.rotation = -0.3;
+      this.rotor = new Sprite(texture(drawRotor()));
+      this.rotor.anchor.set(0.5);
+      this.rotor.position.set(map.exit.x, map.exit.y);
+      this.heli.addChild(heli, this.rotor);
+    }
     this.beacon.blendMode = 'add';
     this.world.addChild(
       ground,
@@ -206,6 +232,7 @@ export class Renderer {
       props,
       ...this.gateSprites,
       this.pickupsLayer,
+      this.heli,
       this.actors,
       this.effects,
       this.glow,
@@ -290,6 +317,42 @@ export class Renderer {
         }
         case 'hit':
           this.splatter(e.x, e.y, e.angle, 4, false);
+          break;
+        case 'explode': {
+          this.flashes.push({ x: e.x, y: e.y, size: 180, age: 0, life: 0.25 });
+          this.shake = Math.max(this.shake, 5);
+          this.stampDecal(this.tex.scorch, e.x, e.y, Math.random() * Math.PI * 2, 0.9);
+          for (let i = 0; i < 24; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = 40 + Math.random() * 120;
+            this.particle(
+              i % 3 === 0 ? this.tex.spark : this.tex.acid,
+              e.x,
+              e.y,
+              Math.cos(a) * sp,
+              Math.sin(a) * sp,
+              0.35,
+              i % 2 === 0,
+              5,
+            );
+          }
+          break;
+        }
+        case 'splash':
+          for (let i = 0; i < 5; i++)
+            this.particle(
+              this.tex.acid,
+              e.x,
+              e.y,
+              (Math.random() - 0.5) * 60,
+              (Math.random() - 0.5) * 60,
+              0.25,
+              true,
+              6,
+            );
+          break;
+        case 'bossStun':
+          this.shake = Math.max(this.shake, 4);
           break;
         case 'kill':
           this.splatter(e.x, e.y, e.angle, 10, true);
@@ -402,6 +465,19 @@ export class Renderer {
       this.arrow.alpha = 0.55 + 0.35 * Math.sin(game.time * 5);
     }
     this.beacon.alpha = 0.25 + 0.2 * Math.sin(game.time * 4);
+    if (this.rotor) this.rotor.rotation += dt * 18;
+    // Pľuvance kyseliny.
+    while (this.spitSprites.length < game.spits.length) {
+      const sprite = new Sprite(this.tex.spit);
+      sprite.anchor.set(0.5);
+      this.effects.addChild(sprite);
+      this.spitSprites.push(sprite);
+    }
+    this.spitSprites.forEach((sprite, i) => {
+      const spit = game.spits[i];
+      sprite.visible = !!spit;
+      if (spit) sprite.position.set(Math.round(spit.x), Math.round(spit.y));
+    });
     this.player.visible = game.respawn <= 0;
     this.drawTracers(dt);
     this.drawDarkness(dt);
@@ -430,7 +506,14 @@ export class Renderer {
       sprite.texture = this.tex.zombie.get(`${z.kind}${Math.floor(z.step) % 2}`)!;
       sprite.position.set(Math.round(z.x), Math.round(z.y));
       sprite.rotation = z.angle + (z.stagger > 0 ? 0.3 : 0);
-      sprite.tint = z.stagger > 0 ? 0xffaaaa : 0xffffff;
+      sprite.tint =
+        z.state === 'windup'
+          ? 0xff7070
+          : z.state === 'stunned'
+            ? 0xaaaaff
+            : z.stagger > 0
+              ? 0xffaaaa
+              : 0xffffff;
     }
     for (const [id, sprite] of this.zombieSprites)
       if (!alive.has(id)) {

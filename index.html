@@ -28,6 +28,10 @@
       <button class="pause-btn" aria-label="Pauza">❚❚</button>
       <button class="mute" aria-label="Zvuk">♪</button>
     </div>
+    <div id="boss-bar" hidden>
+      <span class="boss-name"></span>
+      <div class="boss-hp"><div class="boss-fill"></div></div>
+    </div>
     <div id="banner"></div>
     <div id="toast"></div>
     <div class="stick" id="stick-move"><div class="knob"></div></div>
@@ -50,6 +54,13 @@
       <button class="sound-toggle"></button>
       <button class="to-menu"></button>
       <p class="paused-hint"></p>
+    </section>
+    <section id="victory" class="screen" hidden>
+      <h1 class="victory-title"></h1>
+      <p class="victory-story"></p>
+      <p class="victory-stats"></p>
+      <button class="endless big"></button>
+      <button class="victory-menu"></button>
     </section>
     <section id="done" class="screen" hidden>
       <h1 class="done-title"></h1>

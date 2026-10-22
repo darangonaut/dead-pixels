@@ -1,4 +1,12 @@
-import { PARKING_LINE, ROAD_LINE_H, ROAD_LINE_V, TILE, Tile, type CityMap } from '@/game/map';
+import {
+  PARKING_LINE,
+  ROAD_LINE_H,
+  ROAD_LINE_V,
+  TILE,
+  Tile,
+  type CityMap,
+  type District,
+} from '@/game/map';
 import type { ZombieKind } from '@/game/game';
 import type { WeaponId } from '@/game/weapons';
 import { PixelCanvas, pixelNoise, shade, type Rgb } from './PixelCanvas';
@@ -32,8 +40,13 @@ export const C = {
   yellow: 0xffd34e,
 } as const;
 
-const ROOFS: readonly Rgb[] = [0x4e4446, 0x434b5c, 0x5a4a3a, 0x3c4a3c];
-const CARS: readonly Rgb[] = [0x8a2b2b, 0x2e4f7a, 0xb8b8b0, 0xa8862e, 0x3e6a44];
+const ROOFS: Record<District, readonly Rgb[]> = {
+  city: [0x4e4446, 0x434b5c, 0x5a4a3a, 0x3c4a3c],
+  hospital: [0x8a8e96, 0x7a8088, 0x969aa2, 0x6e747e],
+  metro: [0x34302c, 0x2c2a28, 0x3a3530, 0x302c2a],
+  base: [0x4a5234, 0x3e4630, 0x56583a, 0x444a36],
+};
+const CARS: readonly Rgb[] = [0x8a2b2b, 0x2e4f7a, 0xb8b8b0, 0xa8862e, 0x3e6a44, 0xe8e8e4];
 
 function asphalt(pc: PixelCanvas, x0: number, y0: number): void {
   pc.fillRect(x0, y0, TILE, TILE, C.asphalt);
@@ -69,6 +82,29 @@ function concrete(pc: PixelCanvas, x0: number, y0: number): void {
   // Škáry medzi panelmi.
   if ((x0 / TILE) % 3 === 0) pc.fillRect(x0, y0, 1, TILE, 0x3a3d44);
   if ((y0 / TILE) % 3 === 0) pc.fillRect(x0, y0, TILE, 1, 0x3a3d44);
+}
+
+/** Biela nemocničná dlažba so škárami. */
+function whiteTiles(pc: PixelCanvas, x0: number, y0: number): void {
+  pc.fillRect(x0, y0, TILE, TILE, 0xc4c8ce);
+  for (let i = 0; i < TILE; i++) {
+    pc.set(x0 + i, y0, 0xa8acb4);
+    pc.set(x0 + i, y0 + 8, 0xa8acb4);
+    pc.set(x0, y0 + i, 0xa8acb4);
+    pc.set(x0 + 8, y0 + i, 0xa8acb4);
+  }
+  for (let y = 0; y < TILE; y++)
+    for (let x = 0; x < TILE; x++)
+      if (pixelNoise(x0 + x, y0 + y, 29) < 0.025) pc.set(x0 + x, y0 + y, 0x8a8e96);
+}
+
+/** Štrk koľajiska s drevenými podvalmi. */
+function gravel(pc: PixelCanvas, x0: number, y0: number): void {
+  for (let y = 0; y < TILE; y++)
+    for (let x = 0; x < TILE; x++) {
+      const n = pixelNoise(x0 + x, y0 + y, 37);
+      pc.set(x0 + x, y0 + y, n < 0.3 ? 0x3a3632 : n < 0.7 ? 0x4a4540 : 0x5a554e);
+    }
 }
 
 function grass(pc: PixelCanvas, x0: number, y0: number): void {
@@ -108,6 +144,15 @@ export function drawGround(map: CityMap): PixelCanvas {
         case Tile.Pillar:
           concrete(pc, x0, y0);
           break;
+        case Tile.WhiteFloor:
+        case Tile.Bed:
+        case Tile.Desk:
+          if (map.district === 'hospital') whiteTiles(pc, x0, y0);
+          else concrete(pc, x0, y0);
+          break;
+        case Tile.Track:
+          gravel(pc, x0, y0);
+          break;
         case Tile.Helipad:
           asphalt(pc, x0, y0);
           break;
@@ -146,6 +191,27 @@ export function drawGround(map: CityMap): PixelCanvas {
         for (let i = 0; i < TILE; i++) if ((y0 + i) % 12 < 6) pc.set(x0 + 7, y0 + i, C.line);
       if ((t === Tile.Road || t === Tile.Car) && v === PARKING_LINE)
         pc.fillRect(x0 + 15, y0, 1, TILE, 0xb8bcc4);
+      // Koľaje: podvaly a dve koľajnice (smer podľa variantu, tunel bez smeru = podvaly).
+      if (t === Tile.Track) {
+        const horizontal = v !== ROAD_LINE_V;
+        for (let i = 2; i < TILE; i += 5)
+          if (horizontal) pc.fillRect(x0 + i, y0 + 2, 2, 12, 0x5d3a2c);
+          else pc.fillRect(x0 + 2, y0 + i, 12, 2, 0x5d3a2c);
+        if (v === ROAD_LINE_H) {
+          pc.fillRect(x0, y0 + 4, TILE, 1, 0x9aa0aa);
+          pc.fillRect(x0, y0 + 11, TILE, 1, 0x9aa0aa);
+        } else if (v === ROAD_LINE_V) {
+          pc.fillRect(x0 + 4, y0, 1, TILE, 0x9aa0aa);
+          pc.fillRect(x0 + 11, y0, 1, TILE, 0x9aa0aa);
+        }
+      }
+      // Žltá výstražná hrana nástupišťa pri koľajisku.
+      if (t === Tile.Floor) {
+        if (at(x, y + 1) === Tile.Track) pc.fillRect(x0, y0 + 13, TILE, 3, 0xc8a83a);
+        if (at(x, y - 1) === Tile.Track) pc.fillRect(x0, y0, TILE, 3, 0xc8a83a);
+        if (at(x + 1, y) === Tile.Track) pc.fillRect(x0 + 13, y0, 3, TILE, 0xc8a83a);
+        if (at(x - 1, y) === Tile.Track) pc.fillRect(x0, y0, 3, TILE, 0xc8a83a);
+      }
       if (t === Tile.Pillar) {
         pc.fillRect(x0 + 3, y0 + 3, 10, 10, 0x5a5e66);
         pc.fillRect(x0 + 3, y0 + 3, 10, 2, 0x7a7e88);
@@ -188,7 +254,8 @@ export function drawRoofs(map: CityMap): PixelCanvas {
   for (let y = 0; y < map.height; y++)
     for (let x = 0; x < map.width; x++) {
       if (at(x, y) !== Tile.Building) continue;
-      const roof = ROOFS[v(x, y) % ROOFS.length]!;
+      const palette = ROOFS[map.district];
+      const roof = palette[v(x, y) % palette.length]!;
       const x0 = x * TILE;
       const y0 = y * TILE;
       pc.fillRect(x0, y0, TILE, TILE, roof);
@@ -239,6 +306,11 @@ export function drawProps(map: CityMap): PixelCanvas {
         pc.fillRect(bx + 6, by + 2, 4, h - 4, glass);
         pc.fillRect(bx + 19, by + 2, 3, h - 4, glass);
         pc.fillRect(bx + 10, by + 2, 9, h - 4, shade(body, 0.85));
+        if ((v(x, y) & 0x0f) === 5) {
+          // Sanitka: červený pruh a modrý maják.
+          pc.fillRect(bx, by + 5, w, 2, 0xc82828);
+          pc.fillRect(bx + 12, by + 4, 3, 4, 0x3a7ad8);
+        }
       } else {
         pc.fillRect(bx + 2, by + 6, w - 4, 4, glass);
         pc.fillRect(bx + 2, by + 19, w - 4, 3, glass);
@@ -260,6 +332,36 @@ export function drawProps(map: CityMap): PixelCanvas {
       } else if (t === Tile.Lamp) {
         pc.fillRect(cx - 2, cy - 2, 5, 5, C.metalDark);
         pc.fillRect(cx - 1, cy - 1, 3, 3, C.yellow);
+      } else if (t === Tile.Bed) {
+        // Posteľ / nosidlá: kovový rám, biely matrac, vankúš.
+        const bx = x * TILE + 2;
+        const by = y * TILE + 1;
+        pc.fillRect(bx, by, 12, 14, 0x6a707a);
+        pc.fillRect(bx + 1, by + 1, 10, 12, 0xe8ecf0);
+        pc.fillRect(bx + 2, by + 1, 8, 3, 0xffffff);
+        pc.fillRect(bx + 1, by + 6, 10, 5, map.district === 'hospital' ? 0x7aa8c8 : 0x9a9a8a);
+        if (pixelNoise(x, y, 63) < 0.3) pc.set(bx + 5, by + 8, C.blood);
+      } else if (t === Tile.Desk) {
+        // Pult / lavica / turniket podľa štvrte.
+        const dx = x * TILE + 1;
+        const dy = y * TILE + 4;
+        if (map.district === 'metro') {
+          pc.fillRect(x * TILE + 6, y * TILE + 2, 4, 12, 0x8b93a1);
+          pc.fillRect(x * TILE + 3, y * TILE + 7, 10, 2, 0xb8bcc4);
+        } else {
+          pc.fillRect(dx, dy, 14, 8, C.woodDark);
+          pc.fillRect(dx + 1, dy + 1, 12, 5, C.wood);
+        }
+      } else if (t === Tile.Crate && map.district === 'base') {
+        // Vrecia s pieskom.
+        for (const [sx, sy] of [
+          [2, 3],
+          [8, 3],
+          [5, 8],
+        ] as const) {
+          pc.fillRect(x * TILE + sx, y * TILE + sy, 7, 5, 0x8a7a50);
+          pc.fillRect(x * TILE + sx + 1, y * TILE + sy + 1, 5, 2, 0xa8966a);
+        }
       } else if (t === Tile.Crate) {
         pc.fillRect(x * TILE + 2, y * TILE + 2, 12, 12, C.wood);
         for (let i = 0; i < 12; i++) {
@@ -330,10 +432,90 @@ const ZOMBIE_LOOK: Record<ZombieKind, { shirt: Rgb; skin: Rgb; size: number }> =
   walker: { shirt: 0x5a4a6a, skin: C.zombieSkin, size: 1 },
   runner: { shirt: 0x7a3030, skin: 0xa8b88a, size: 1 },
   brute: { shirt: 0x3a3f2a, skin: 0x7a9a62, size: 1.5 },
+  exploder: { shirt: 0x8a9a3a, skin: 0xb8c860, size: 1 },
+  spitter: { shirt: 0x2f4a3a, skin: 0x9ad06a, size: 1 },
+  boss: { shirt: 0x5a3a3a, skin: 0x8fa070, size: 2.4 },
 };
+
+/** Elipsa (telo nafúknutej zombie, bossa). */
+function blob(
+  pc: PixelCanvas,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  color: (x: number, y: number) => Rgb,
+): void {
+  for (let y = -ry; y <= ry; y++)
+    for (let x = -rx; x <= rx; x++)
+      if ((x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1) pc.set(cx + x, cy + y, color(x, y));
+}
+
+/** Nafúknutá zombie: guľaté telo s pľuzgiermi, krátke ruky. */
+function drawExploder(frame: number): PixelCanvas {
+  const pc = new PixelCanvas(20, 20);
+  blob(pc, 9, 10, 7, 7, (x, y) =>
+    pixelNoise(x + 9, y + 10, 5) < 0.12 ? 0xd8e070 : x + y < -3 ? 0xb8c860 : 0x8a9a3a,
+  );
+  for (const [px, py] of [
+    [6, 7],
+    [11, 13],
+    [12, 6],
+  ] as const) {
+    pc.set(px, py, 0xe8f080);
+    pc.set(px + 1, py, 0x6a7a20);
+  }
+  pc.fillRect(15, 6 + frame, 3, 2, 0xb8c860);
+  pc.fillRect(15, 12 - frame, 3, 2, 0xb8c860);
+  pc.stamp(11, 8, ['hh', 'Hh', 'hH', 'hh'], { h: 0xa8b860, H: C.ink });
+  pc.outline(C.ink);
+  return pc;
+}
+
+/** Pľujúca zombie: vychudnutá, zhrbená, kyselina v ústach. */
+function drawSpitter(frame: number): PixelCanvas {
+  const pc = new PixelCanvas(16, 16);
+  pc.stamp(3, 4, ['.ss.', 'ssss', 'sSss', 'ssss', 'ssss', '.ss.'], { s: 0x2f4a3a, S: 0x456a50 });
+  pc.fillRect(7, 5 + frame, 4, 1, 0x9ad06a);
+  pc.fillRect(7, 10 - frame, 4, 1, 0x9ad06a);
+  pc.stamp(6, 5, ['hhh', 'hHh', 'hhg', 'hhg', 'hHh', 'hhh'], {
+    h: 0x9ad06a,
+    H: C.ink,
+    g: 0x7fff3a,
+  });
+  pc.set(10, 7, 0x7fff3a);
+  pc.set(11, 8, 0x7fff3a);
+  pc.outline(C.ink);
+  return pc;
+}
+
+/** Boss „Mäsiar“: obrovské telo, zástera od krvi, sekáčik. */
+function drawBoss(frame: number): PixelCanvas {
+  const pc = new PixelCanvas(36, 34);
+  const cx = 15;
+  const cy = 17;
+  blob(pc, cx, cy, 11, 13, (x, y) => {
+    if (x > 2 && Math.abs(y) < 9)
+      return pixelNoise(x + 40, y + 40, 9) < 0.2 ? C.bloodDark : 0xc8c0b0; // zástera
+    return x + y < -6 ? 0x6e4a4a : 0x5a3a3a;
+  });
+  // Ruky: jedna so sekáčikom, druhá natiahnutá.
+  pc.fillRect(cx + 6, cy - 12 + frame, 9, 4, 0x8fa070);
+  pc.fillRect(cx + 6, cy + 8 - frame, 8, 4, 0x8fa070);
+  pc.fillRect(cx + 14, cy - 15 + frame, 6, 8, 0xb8bcc4);
+  pc.fillRect(cx + 14, cy - 15 + frame, 6, 2, 0xe0e4ea);
+  // Hlava.
+  blob(pc, cx + 4, cy, 5, 5, (x, y) => (x === 2 && Math.abs(y) === 2 ? 0xff3030 : 0x8fa070));
+  pc.set(cx + 1, cy - 4, C.blood);
+  pc.outline(C.ink);
+  return pc;
+}
 
 /** Zombie s rukami natiahnutými dopredu (+x); dve fázy kroku. */
 export function drawZombie(kind: ZombieKind, frame: number): PixelCanvas {
+  if (kind === 'exploder') return drawExploder(frame);
+  if (kind === 'spitter') return drawSpitter(frame);
+  if (kind === 'boss') return drawBoss(frame);
   const look = ZOMBIE_LOOK[kind];
   const big = look.size > 1;
   const pc = new PixelCanvas(big ? 24 : 16, big ? 22 : 16);
@@ -472,6 +654,51 @@ export function drawArrow(): PixelCanvas {
       y: C.yellow,
     },
   );
+  return pc;
+}
+
+/** Pľuvanec kyseliny. */
+export function drawSpit(): PixelCanvas {
+  const pc = new PixelCanvas(6, 6);
+  pc.stamp(0, 0, ['.gg.', 'gGGg', 'gGGg', '.gg.'], { g: 0x5ab02a, G: 0xb8ff6a });
+  return pc;
+}
+
+/** Spálenina po výbuchu (stopa na zemi). */
+export function drawScorch(): PixelCanvas {
+  const pc = new PixelCanvas(40, 40);
+  for (let y = 0; y < 40; y++)
+    for (let x = 0; x < 40; x++) {
+      const d = Math.hypot(x - 20, y - 20);
+      const n = pixelNoise(x, y, 77);
+      if (d < 14 + n * 6) pc.set(x, y, n < 0.3 ? 0x101010 : 0x1e1c1a, 200);
+      else if (d < 19 && n < 0.2) pc.set(x, y, 0x5ab02a, 160);
+    }
+  return pc;
+}
+
+/** Vojenský vrtuľník zhora (rotor zvlášť, otáča sa). */
+export function drawHelicopter(): PixelCanvas {
+  const pc = new PixelCanvas(60, 26);
+  blob(pc, 20, 13, 14, 9, (x, y) => (x + y < -6 ? 0x5e6a40 : 0x48522f));
+  pc.fillRect(32, 11, 24, 4, 0x48522f);
+  pc.fillRect(52, 6, 3, 14, 0x3a4226);
+  blob(pc, 28, 13, 5, 6, () => 0x2a3a4a);
+  pc.fillRect(8, 2, 3, 22, 0x2a2e22);
+  pc.fillRect(26, 2, 3, 22, 0x2a2e22);
+  pc.outline(C.ink);
+  return pc;
+}
+
+export function drawRotor(): PixelCanvas {
+  const pc = new PixelCanvas(64, 64);
+  for (let i = -30; i <= 30; i++) {
+    pc.set(32 + i, 32, 0x2a2e22, 200);
+    pc.set(32 + i, 33, 0x2a2e22, 200);
+    pc.set(32, 32 + i, 0x2a2e22, 200);
+    pc.set(33, 32 + i, 0x2a2e22, 200);
+  }
+  pc.fillRect(30, 30, 6, 6, 0x1a1c16);
   return pc;
 }
 

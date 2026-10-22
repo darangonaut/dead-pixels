@@ -164,6 +164,26 @@ export class Sound {
           this.tone('square', 392, 784, 0.6, 0.12);
           this.burst(1.5, 300, 0.2, 2);
           break;
+        case 'explode':
+          this.burst(0.8, 500, 1.0, 0.8);
+          this.tone('sine', 90, 30, 0.6, 0.6);
+          break;
+        case 'spit':
+          this.burst(0.12, 1800, 0.18, 6);
+          break;
+        case 'splash':
+          this.burst(0.1, 900, 0.12, 3);
+          break;
+        case 'boss':
+          this.tone('sawtooth', 70, 35, 2.2, 0.4);
+          this.tone('square', 55, 30, 2.4, 0.2);
+          break;
+        case 'bossWindup':
+          this.tone('sawtooth', 60, 140, 0.6, 0.3);
+          break;
+        case 'bossStun':
+          this.burst(0.4, 400, 0.7, 1);
+          break;
         case 'died':
           this.tone('sawtooth', 220, 50, 1.2, 0.25);
           break;

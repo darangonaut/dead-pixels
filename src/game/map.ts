@@ -21,11 +21,50 @@ export const enum Tile {
   Helipad,
   /** Stĺp v sklade. */
   Pillar,
+  /** Biela dlažba (nemocnica). */
+  WhiteFloor,
+  /** Posteľ / nosidlá — nedá sa prejsť, svetlo prejde. */
+  Bed,
+  /** Štrk s podvalmi (koľajisko metra) — priechodné. */
+  Track,
+  /** Pult, lavica, turniket — nedá sa prejsť, svetlo prejde. */
+  Desk,
 }
 
-export type RoomType = 'street' | 'alley' | 'parking' | 'park' | 'warehouse' | 'plaza';
-export type Encounter = 'start' | 'calm' | 'roam' | 'horde' | 'exit';
-export type SpawnKind = 'walker' | 'runner' | 'brute';
+/** Štvrť (prostredie) podľa úrovne. */
+export type District = 'city' | 'hospital' | 'metro' | 'base';
+
+/** Úrovne 1–3 mesto, 4–6 nemocnica, 7–9 metro, 10 vojenská základňa; potom dokola. */
+export function districtOf(level: number): District {
+  if (level <= 3) return 'city';
+  if (level <= 6) return 'hospital';
+  if (level <= 9) return 'metro';
+  if (level === 10) return 'base';
+  return (['city', 'hospital', 'metro', 'base'] as const)[(level - 11) % 4]!;
+}
+
+/** Posledná úroveň príbehu (útek vrtuľníkom); potom nekonečný režim. */
+export const FINAL_LEVEL = 10;
+
+/** Úroveň s bossom (každá piata). */
+export const isBossLevel = (level: number): boolean => level % 5 === 0;
+
+export type RoomType =
+  | 'street'
+  | 'alley'
+  | 'parking'
+  | 'park'
+  | 'warehouse'
+  | 'plaza'
+  | 'ward'
+  | 'lobby'
+  | 'corridor'
+  | 'ambulance'
+  | 'platform'
+  | 'tunnel'
+  | 'concourse';
+export type Encounter = 'start' | 'calm' | 'roam' | 'horde' | 'boss' | 'exit';
+export type SpawnKind = 'walker' | 'runner' | 'brute' | 'exploder' | 'spitter';
 
 /** Úsek úrovne: obdĺžnik políčok obklopený budovami, s bránou dnu a von. */
 export interface Room {
@@ -59,6 +98,7 @@ export interface Gate {
 
 /** Úroveň: mriežka políčok, úseky pospájané bránami, štart a heliport. */
 export interface CityMap {
+  district: District;
   width: number;
   height: number;
   tiles: Uint8Array;
@@ -83,6 +123,8 @@ const SOLID = new Set<Tile>([
   Tile.Crate,
   Tile.Gate,
   Tile.Pillar,
+  Tile.Bed,
+  Tile.Desk,
 ]);
 const OPAQUE = new Set<Tile>([Tile.Building, Tile.Car, Tile.Crate, Tile.Pillar]);
 
@@ -176,16 +218,43 @@ export function generateLevel(seed: number, level = 1): CityMap {
     placed++;
   }
   for (const i of middle) if (encounters[i] === 'calm' && rng() < 0.65) encounters[i] = 'roam';
+  // Boss v úseku pred heliportom (každá piata úroveň).
+  if (isBossLevel(level) && cells.length > 2) {
+    const i = cells.length - 2;
+    encounters[i] = 'boss';
+    if (encounters[i - 1] === 'horde') encounters[i - 1] = 'roam';
+  }
 
-  const TYPES: RoomType[] = ['street', 'alley', 'parking', 'park', 'warehouse', 'plaza'];
+  const district = districtOf(level);
+  const TYPES: Record<District, RoomType[]> = {
+    city: ['street', 'alley', 'parking', 'park', 'warehouse', 'plaza'],
+    hospital: ['ward', 'lobby', 'corridor', 'ambulance', 'park', 'ward'],
+    metro: ['platform', 'tunnel', 'concourse', 'platform', 'tunnel', 'warehouse'],
+    base: ['street', 'warehouse', 'parking', 'plaza', 'alley'],
+  };
+  const START: Record<District, RoomType> = {
+    city: 'street',
+    hospital: 'ambulance',
+    metro: 'concourse',
+    base: 'street',
+  };
+  const EXIT: Record<District, RoomType> = {
+    city: 'parking',
+    hospital: 'ambulance',
+    metro: 'plaza',
+    base: 'parking',
+  };
+  const types = TYPES[district];
   const rooms: Room[] = cells.map(({ cx, cy }, index) => ({
     index,
     type:
       index === 0
-        ? 'street'
+        ? START[district]
         : index === cells.length - 1
-          ? 'parking'
-          : TYPES[randomInt(rng, 0, TYPES.length - 1)]!,
+          ? EXIT[district]
+          : encounters[index] === 'boss'
+            ? 'warehouse'
+            : types[randomInt(rng, 0, types.length - 1)]!,
     encounter: encounters[index]!,
     x0: cx * CW + 1,
     y0: cy * CH + 1,
@@ -250,14 +319,24 @@ export function generateLevel(seed: number, level = 1): CityMap {
     const fill = (t: Tile, v = 0) => {
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, t, v);
     };
-    const floorOf: Tile =
-      room.type === 'warehouse'
-        ? Tile.Floor
-        : room.type === 'park'
-          ? Tile.Grass
-          : room.type === 'alley' || room.type === 'plaza'
-            ? Tile.Sidewalk
-            : Tile.Road;
+    const FLOORS: Record<RoomType, Tile> = {
+      street: Tile.Road,
+      parking: Tile.Road,
+      ambulance: Tile.Road,
+      park: Tile.Grass,
+      alley: Tile.Sidewalk,
+      plaza: Tile.Sidewalk,
+      warehouse: Tile.Floor,
+      ward: Tile.WhiteFloor,
+      lobby: Tile.WhiteFloor,
+      corridor: Tile.WhiteFloor,
+      platform: Tile.Floor,
+      concourse: Tile.Floor,
+      tunnel: Tile.Track,
+    };
+    const floorOf = FLOORS[room.type];
+    // Úseky vyrezané do hmoty budov (úzke, kľukaté).
+    const carved = room.type === 'alley' || room.type === 'corridor' || room.type === 'tunnel';
     switch (room.type) {
       case 'street': {
         const horizontal = rng() < 0.6;
@@ -342,8 +421,91 @@ export function generateLevel(seed: number, level = 1): CityMap {
         break;
       }
       case 'alley':
-        // Úzke uličky medzi budovami: steny zostanú, chodník sa vyreže nižšie.
+      case 'corridor':
+      case 'tunnel':
+        // Úzke uličky / chodby / tunely: steny zostanú, priechod sa vyreže nižšie.
         break;
+      case 'ward': {
+        // Nemocničné oddelenie: rady postelí pri stenách, uprostred voľná ulička.
+        fill(Tile.WhiteFloor);
+        for (let x = x0 + 1; x <= x1 - 1; x += 3) {
+          if (rng() < 0.85) set(x, y0 + 1, Tile.Bed);
+          if (rng() < 0.85) set(x, y1 - 1, Tile.Bed);
+        }
+        for (let i = 0; i < 4; i++)
+          set(randomInt(rng, x0 + 3, x1 - 3), randomInt(rng, y0 + 4, y1 - 4), Tile.Bed);
+        lamp(center.x - 5, center.y);
+        lamp(center.x + 5, center.y);
+        break;
+      }
+      case 'lobby': {
+        // Vstupná hala: recepcia, rady stoličiek, kvetináče.
+        fill(Tile.WhiteFloor);
+        for (let x = center.x - 3; x <= center.x + 3; x++) set(x, center.y - 3, Tile.Desk);
+        for (let row = center.y + 1; row <= y1 - 2; row += 3)
+          for (let x = x0 + 3; x <= x1 - 3; x++) if (x % 4 !== 0) set(x, row, Tile.Desk);
+        for (const [px, py] of [
+          [x0 + 1, y0 + 1],
+          [x1 - 1, y0 + 1],
+        ] as const)
+          set(px, py, Tile.Tree);
+        lamp(x0 + 4, y0 + 2);
+        lamp(x1 - 4, y0 + 2);
+        break;
+      }
+      case 'ambulance': {
+        // Parkovisko sanitiek (biele autá s červeným pruhom).
+        fill(Tile.Road);
+        for (let row = y0 + 2; row <= y1 - 3; row += 6)
+          for (let x = x0 + 2; x <= x1 - 3; x += 3)
+            if (rng() < 0.5) {
+              const color = 5 | 0x10;
+              set(x, row, Tile.Car, color);
+              set(x + 1, row, Tile.Car, color | 0x20);
+            }
+        lamp(x0 + 1, y0 + 1);
+        lamp(x1 - 1, y1 - 1);
+        break;
+      }
+      case 'platform': {
+        // Nástupište: koľaje v strede, žltá hrana, lavice a stĺpy.
+        fill(Tile.Floor);
+        const horizontal = w >= h;
+        if (horizontal) {
+          for (let x = x0; x <= x1; x++)
+            for (let y = center.y - 1; y <= center.y + 1; y++) set(x, y, Tile.Track, ROAD_LINE_H);
+          for (let x = x0 + 2; x <= x1 - 2; x += 5) {
+            set(x, y0 + 2, Tile.Pillar);
+            set(x, y1 - 2, Tile.Pillar);
+            if (x + 2 <= x1) set(x + 2, y0 + 1, Tile.Desk);
+          }
+        } else {
+          for (let y = y0; y <= y1; y++)
+            for (let x = center.x - 1; x <= center.x + 1; x++) set(x, y, Tile.Track, ROAD_LINE_V);
+          for (let y = y0 + 2; y <= y1 - 2; y += 5) {
+            set(x0 + 2, y, Tile.Pillar);
+            set(x1 - 2, y, Tile.Pillar);
+          }
+        }
+        lamp(x0 + 1, y0 + 1);
+        lamp(x1 - 1, y1 - 1);
+        break;
+      }
+      case 'concourse': {
+        // Vestibul: rad turniketov s medzerami, stánky.
+        fill(Tile.Floor);
+        for (let y = y0 + 1; y <= y1 - 1; y++) if (y % 3 !== 0) set(center.x, y, Tile.Desk);
+        for (let i = 0; i < 4; i++) {
+          const kx = randomInt(rng, x0 + 2, x1 - 3);
+          const ky = randomInt(rng, y0 + 2, y1 - 3);
+          set(kx, ky, Tile.Crate);
+          set(kx + 1, ky, Tile.Crate);
+        }
+        lamp(x0 + 2, y0 + 1);
+        lamp(x1 - 2, y1 - 1);
+        lamp(center.x + 3, center.y);
+        break;
+      }
       case 'plaza': {
         fill(Tile.Sidewalk);
         for (const [px, py] of [
@@ -382,14 +544,14 @@ export function generateLevel(seed: number, level = 1): CityMap {
               const ty = y + dy;
               if (tx < x0 || ty < y0 || tx > x1 || ty > y1) continue;
               const t = get(tx, ty);
-              if (room.type === 'alley' ? t !== Tile.Lamp && t !== Tile.Crate : PROPS.has(t))
+              if (carved ? t !== Tile.Lamp && t !== Tile.Crate && t !== Tile.Bed : PROPS.has(t))
                 set(tx, ty, floorOf);
             }
         }
       }
     };
-    if (room.type === 'alley') {
-      // Kľukatá ulička cez náhodný bod, s kontajnermi pri stenách.
+    if (carved) {
+      // Kľukatá ulička / chodba / tunel cez náhodný bod, s prekážkami pri stenách.
       const via = { x: randomInt(rng, x0 + 3, x1 - 3), y: randomInt(rng, y0 + 3, y1 - 3) };
       for (const d of doors) carve(d, via, 2);
       carve(via, center, 2);
@@ -399,13 +561,15 @@ export function generateLevel(seed: number, level = 1): CityMap {
         const nearWall = [get(x + 1, y), get(x - 1, y), get(x, y + 1), get(x, y - 1)].includes(
           Tile.Building,
         );
-        if (get(x, y) === Tile.Sidewalk && nearWall) set(x, y, Tile.Crate);
+        if (get(x, y) === floorOf && nearWall)
+          set(x, y, room.type === 'corridor' ? Tile.Bed : Tile.Crate);
       }
-      lamp(via.x, via.y);
+      // Tunel je tmavý: lampa len občas.
+      if (room.type !== 'tunnel' || rng() < 0.4) lamp(via.x, via.y);
     }
     for (const d of doors) carve(d, center, 1);
     // Kontajnery v uličke nesmú zablokovať cestu: znova vyrezať úzko.
-    if (room.type === 'alley') for (const d of doors) carve(d, center, 0);
+    if (carved) for (const d of doors) carve(d, center, 0);
 
     // Heliport v poslednom úseku: 4 × 4 v strede, bez prekážok okolo.
     if (room.encounter === 'exit') {
@@ -423,7 +587,8 @@ export function generateLevel(seed: number, level = 1): CityMap {
 
   // Brány: z hordy von zavreté, kým sa úsek nevyčistí.
   for (const gate of gates) {
-    gate.open = rooms[gate.id]!.encounter !== 'horde';
+    const enc = rooms[gate.id]!.encounter;
+    gate.open = enc !== 'horde' && enc !== 'boss';
     for (const t of gate.tiles) {
       tiles[t] = gate.open ? Tile.Door : Tile.Gate;
       roomOf[t] = gate.id;
@@ -452,7 +617,15 @@ export function generateLevel(seed: number, level = 1): CityMap {
         if (!at) continue;
         const roll = rng();
         const kind: SpawnKind =
-          level >= 3 && roll < 0.08 ? 'brute' : level >= 2 && roll < 0.35 ? 'runner' : 'walker';
+          level >= 3 && roll < 0.08
+            ? 'brute'
+            : level >= 3 && roll < 0.16
+              ? 'exploder'
+              : level >= 5 && roll < 0.24
+                ? 'spitter'
+                : level >= 2 && roll < 0.45
+                  ? 'runner'
+                  : 'walker';
         room.roamers.push({ kind, ...at });
       }
     }
@@ -465,6 +638,7 @@ export function generateLevel(seed: number, level = 1): CityMap {
 
   const exitRoom = rooms.at(-1)!;
   return {
+    district,
     width,
     height,
     tiles,

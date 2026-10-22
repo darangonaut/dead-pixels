@@ -3,6 +3,7 @@ import '@fontsource/pixelify-sans/700.css';
 import './styles.css';
 import { Sound } from './audio/audio';
 import { Game, type Carry, type GameEvent } from './game/game';
+import { FINAL_LEVEL } from './game/map';
 import { Controls } from './input/input';
 import { Renderer } from './render/renderer';
 import { getLanguage, setLanguage, t, type Language } from './ui/i18n';
@@ -16,6 +17,8 @@ const start = $('#start');
 const over = $('#over');
 const done = $('#done');
 const pausedScreen = $('#paused');
+const victory = $('#victory');
+const bossBar = $('#boss-bar');
 const banner = $('#banner');
 const toast = $('#toast');
 const hurt = $('#hurt');
@@ -56,6 +59,11 @@ function renderTexts(): void {
   $('.dead').textContent = t('dead');
   $('.next').textContent = t('nextLevel');
   $('.paused-title').textContent = t('paused');
+  $('.victory-title').textContent = t('victoryTitle');
+  $('.victory-story').textContent = t('victoryStory');
+  $('.endless').textContent = t('endlessButton');
+  $('.victory-menu').textContent = t('toMenu');
+  $('.boss-name').textContent = t('bossName');
   $('.resume').textContent = t('resume');
   $('.sound-toggle').textContent = sound.muted ? t('soundOff') : t('soundOn');
   $('.to-menu').textContent = t('toMenu');
@@ -96,7 +104,7 @@ let seed = 0;
 
 async function newGame(level = 1, carry?: Carry): Promise<void> {
   sound.start();
-  if (level === 1) seed = Math.floor(Math.random() * 1e9);
+  if (level === 1 || !seed) seed = Math.floor(Math.random() * 1e9);
   renderer?.destroy();
   renderer = null;
   game = null;
@@ -114,12 +122,26 @@ async function newGame(level = 1, carry?: Carry): Promise<void> {
   title.stop();
   over.hidden = true;
   done.hidden = true;
+  victory.hidden = true;
   hud.hidden = false;
   weaponBtn.hidden = !controls.touchMode;
-  showBanner(t('level', { n: level }), 2.5);
+  const districtKey = {
+    city: 'districtCity',
+    hospital: 'districtHospital',
+    metro: 'districtMetro',
+    base: 'districtBase',
+  } as const;
+  showBanner(
+    `${t('level', { n: level })} · ${t(districtKey[next.map.district])}${level > FINAL_LEVEL ? ` · ${t('endless')}` : ''}`,
+    3,
+  );
 }
 
-$('.play').addEventListener('click', () => void newGame());
+// Ladenie: `?debug&level=N` začne rovno na N-tej úrovni.
+const debugLevel = new URLSearchParams(location.search).has('debug')
+  ? Number(new URLSearchParams(location.search).get('level')) || 1
+  : 1;
+$('.play').addEventListener('click', () => void newGame(debugLevel));
 $('.again').addEventListener('click', () => void newGame());
 $('.next').addEventListener('click', () => {
   if (game) void newGame(game.level + 1, game.carry());
@@ -137,7 +159,13 @@ mute.addEventListener('click', toggleSound);
 let paused = false;
 /** Pauza sa dá zapnúť len počas hrania (nie na obrazovkách menu, smrti, konca úrovne). */
 const playing = () =>
-  !!game && !game.over && !game.complete && start.hidden && over.hidden && done.hidden;
+  !!game &&
+  !game.over &&
+  !game.complete &&
+  start.hidden &&
+  over.hidden &&
+  done.hidden &&
+  victory.hidden;
 
 function setPaused(next: boolean): void {
   if (next && !playing()) return;
@@ -155,7 +183,13 @@ function setPaused(next: boolean): void {
 $('.pause-btn').addEventListener('click', () => setPaused(true));
 $('.resume').addEventListener('click', () => setPaused(false));
 $('.sound-toggle').addEventListener('click', toggleSound);
+$('.endless').addEventListener('click', () => {
+  if (game) void newGame(game.level + 1, game.carry());
+});
+$('.victory-menu').addEventListener('click', () => $<HTMLButtonElement>('.to-menu').click());
 $('.to-menu').addEventListener('click', () => {
+  victory.hidden = true;
+  bossBar.hidden = true;
   setPaused(false);
   renderer?.destroy();
   renderer = null;
@@ -198,7 +232,12 @@ let lastHud = '';
 
 const livesEl = $('.lives');
 
+const bossFill = $('.boss-fill');
+
 function updateHud(g: Game): void {
+  const boss = g.boss;
+  bossBar.hidden = !boss;
+  if (boss) bossFill.style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
   const p = g.player;
   const ammoText = Number.isFinite(p.ammo[p.weapon]) ? String(p.ammo[p.weapon]) : '∞';
   const horde = g.hordeRemaining;
@@ -224,7 +263,16 @@ function react(events: GameEvent[], g: Game): void {
     if (e.type === 'cleared') showBanner(t('cleared'), 1.6);
     if (e.type === 'died' && e.lives > 0) showBanner(t('died', { n: e.lives }), 1.6);
     if (e.type === 'room' && e.room === g.map.rooms.length - 1) showBanner(t('reachExit'), 2);
-    if (e.type === 'levelComplete') {
+    if (e.type === 'boss') showBanner(t('boss'), 2);
+    if (e.type === 'explode') navigator.vibrate?.(80);
+    if (e.type === 'levelComplete' && e.final) {
+      setTimeout(() => {
+        $('.victory-stats').textContent = t('victoryStats', { kills: g.kills, score: g.score });
+        victory.hidden = false;
+        weaponBtn.hidden = true;
+        bossBar.hidden = true;
+      }, 1200);
+    } else if (e.type === 'levelComplete') {
       setTimeout(() => {
         $('.done-title').textContent = t('levelDone', { n: e.level });
         $('.done-summary').textContent = t('levelSummary', { kills: g.kills, score: g.score });

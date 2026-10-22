@@ -44,7 +44,12 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
   Šípka pri hráčovi ukazuje smer k ďalším dverám.
 - Zbrane: pištoľ (neobmedzené náboje), brokovnica, samopal. Náboje, lekárničky a nové zbrane
   vypadávajú zo zombie.
-- Zombie: chodci, rýchli bežci a obri, ktorí vydržia veľa.
+- Štvrte: úrovne 1–3 centrum mesta, 4–6 nemocnica (oddelenia, hala, chodby, sanitky),
+  7–9 metro (nástupištia, tunely, vestibul), 10 vojenská základňa. Na 10. úrovni čaká na
+  heliporte vrtuľník — útek z mesta je koniec príbehu, potom sa dá pokračovať v nekonečnom režime.
+- Zombie: chodci, rýchli bežci, obri, nafúknuté (vybuchnú pri hráčovi aj po zastrelení — zrania
+  aj ostatné zombie), pľujúce (držia si odstup a pľujú kyselinu) a boss Mäsiar na 5. a 10. úrovni
+  (rozbehne sa za hráčom; keď narazí do steny, je omráčený).
 - Tma: baterka, lampy (niektoré blikajú alebo nesvietia) a záblesky výstrelov.
 - Krv a mŕtvoly zostávajú na zemi.
 

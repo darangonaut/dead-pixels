@@ -10,6 +10,12 @@ TypeScript · Vite · PixiJS 8 · Vitest
 
 ![Horda v kuželi baterky](docs/screenshots/action.png)
 
+| Nemocnica sv. Anny                          | Metro: pľujúce zombie na nástupišti    |
+| ------------------------------------------- | -------------------------------------- |
+| ![Nemocnica](docs/screenshots/hospital.png) | ![Metro](docs/screenshots/metro.png)   |
+| **Boss Mäsiar**                             | **Útek vrtuľníkom (10. úroveň)**       |
+| ![Boss Mäsiar](docs/screenshots/boss.png)   | ![Vrtuľník](docs/screenshots/heli.png) |
+
 | Úvodná obrazovka                                | Mobil (dve dotykové páčky)                    |
 | ----------------------------------------------- | --------------------------------------------- |
 | ![Úvodná obrazovka](docs/screenshots/title.png) | ![Hra na mobile](docs/screenshots/mobile.png) |

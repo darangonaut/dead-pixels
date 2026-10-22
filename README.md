@@ -8,6 +8,12 @@ TypeScript · Vite · PixiJS 8 · Vitest
 
 **Hrať online:** https://darangonaut.github.io/dead-pixels/
 
+![Horda v kuželi baterky](docs/screenshots/action.png)
+
+| Úvodná obrazovka                                | Mobil (dve dotykové páčky)                    |
+| ----------------------------------------------- | --------------------------------------------- |
+| ![Úvodná obrazovka](docs/screenshots/title.png) | ![Hra na mobile](docs/screenshots/mobile.png) |
+
 ## Spustenie
 
 ```sh

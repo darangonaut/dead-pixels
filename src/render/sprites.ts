@@ -256,13 +256,7 @@ export function drawProps(map: CityMap): PixelCanvas {
       const cx = x * TILE + 8;
       const cy = y * TILE + 8;
       if (t === Tile.Tree) {
-        for (let yy = -8; yy <= 8; yy++)
-          for (let xx = -8; xx <= 8; xx++) {
-            const d = xx * xx + yy * yy;
-            if (d > 64 + pixelNoise(cx + xx, cy + yy, 71) * 20) continue;
-            const light = xx + yy < -4 && pixelNoise(cx + xx, cy + yy, 72) < 0.6;
-            pc.set(cx + xx, cy + yy, light ? C.leafLight : C.leaf);
-          }
+        drawTree(pc, cx, cy);
       } else if (t === Tile.Lamp) {
         pc.fillRect(cx - 2, cy - 2, 5, 5, C.metalDark);
         pc.fillRect(cx - 1, cy - 1, 3, 3, C.yellow);
@@ -277,6 +271,36 @@ export function drawProps(map: CityMap): PixelCanvas {
       }
     }
   return pc;
+}
+
+/**
+ * Koruna stromu zhora: tieň posunutý nabok, tmavý obrys a sýta zelená s odleskom
+ * (aby sa strom nestratil na tráve).
+ */
+function drawTree(pc: PixelCanvas, cx: number, cy: number): void {
+  const R = 9;
+  const inside = (xx: number, yy: number) =>
+    xx * xx + yy * yy <= 64 + pixelNoise(cx + xx, cy + yy, 71) * 22;
+  // Tieň.
+  for (let yy = -R; yy <= R; yy++)
+    for (let xx = -R; xx <= R; xx++)
+      if (inside(xx, yy)) pc.set(cx + xx + 3, cy + yy + 3, 0x0b160c, 190);
+  // Obrys.
+  for (let yy = -R - 1; yy <= R + 1; yy++)
+    for (let xx = -R - 1; xx <= R + 1; xx++) {
+      if (inside(xx, yy)) continue;
+      if (inside(xx + 1, yy) || inside(xx - 1, yy) || inside(xx, yy + 1) || inside(xx, yy - 1))
+        pc.set(cx + xx, cy + yy, 0x0e2414);
+    }
+  // Koruna: tieňovanie podľa vzdialenosti od svetla vľavo hore, chumáče lístia.
+  for (let yy = -R; yy <= R; yy++)
+    for (let xx = -R; xx <= R; xx++) {
+      if (!inside(xx, yy)) continue;
+      const lit = (-xx - yy) / (R * 1.6) + (pixelNoise(cx + xx, cy + yy, 72) - 0.5) * 0.5;
+      const color =
+        lit > 0.55 ? 0x86c95e : lit > 0.15 ? 0x4f9c45 : lit > -0.35 ? 0x2f7438 : 0x1a4d2a;
+      pc.set(cx + xx, cy + yy, color);
+    }
 }
 
 // --- Postavy (otáčajú sa, kreslené pri pohľade doprava) ---

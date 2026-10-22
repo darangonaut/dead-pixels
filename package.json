@@ -10,7 +10,8 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy:pages": "bash scripts/deploy-pages.sh"
   },
   "dependencies": {
     "@fontsource/pixelify-sans": "^5.3.0",

@@ -6,12 +6,16 @@ zombie. Hrá sa na počítači aj na mobile.
 
 TypeScript · Vite · PixiJS 8 · Vitest
 
+**Hrať online:** https://darangonaut.github.io/dead-pixels/
+
 ## Spustenie
 
 ```sh
 npm install
 npm run dev     # http://localhost:5173
 ```
+
+Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
 
 ## Ovládanie
 

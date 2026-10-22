@@ -29,9 +29,16 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
 
 ## Hra
 
+- Úroveň je cesta cez 6–12 úsekov (ulica, ulička, parkovisko, park, sklad, námestie)
+  pospájaných bránami — od havarovaného auta k evakuačnému heliportu. Každá ďalšia úroveň je
+  dlhšia a ťažšia, zbrane, náboje a skóre sa prenášajú.
+- V úsekoch: **horda** (brána za tebou sa zavrie, ďalej sa dá až po vyčistení), túlavé zombie,
+  ktoré si ťa všimnú, keď ťa uvidia alebo začujú streľbu, a pokojné úseky so zásobami.
+- Kontrolné body: po smrti začneš na začiatku úseku. 3 životy, +1 za každú dokončenú úroveň.
+  Šípka pri hráčovi ukazuje smer k ďalším dverám.
 - Zbrane: pištoľ (neobmedzené náboje), brokovnica, samopal. Náboje, lekárničky a nové zbrane
   vypadávajú zo zombie.
-- Zombie: chodci, rýchli bežci a obri, ktorí vydržia veľa. Každá vlna je väčšia.
+- Zombie: chodci, rýchli bežci a obri, ktorí vydržia veľa.
 - Tma: baterka, lampy (niektoré blikajú alebo nesvietia) a záblesky výstrelov.
 - Krv a mŕtvoly zostávajú na zemi.
 

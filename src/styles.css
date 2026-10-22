@@ -109,6 +109,24 @@ button.big {
   color: #ffd34e;
 }
 
+.lives {
+  font-size: 16px;
+  color: var(--red);
+  letter-spacing: 2px;
+}
+
+.done-title {
+  margin: 0;
+  font-size: 44px;
+  color: #ffd34e;
+  text-shadow: 4px 4px 0 var(--ink);
+}
+
+.done-summary {
+  margin: 0;
+  font-size: 20px;
+}
+
 .stats {
   font-size: 14px;
   color: var(--muted);

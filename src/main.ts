@@ -2,7 +2,7 @@ import '@fontsource/pixelify-sans/400.css';
 import '@fontsource/pixelify-sans/700.css';
 import './styles.css';
 import { Sound } from './audio/audio';
-import { Game, type GameEvent } from './game/game';
+import { Game, type Carry, type GameEvent } from './game/game';
 import { Controls } from './input/input';
 import { Renderer } from './render/renderer';
 import { getLanguage, setLanguage, t, type Language } from './ui/i18n';
@@ -13,6 +13,7 @@ const host = $('#game');
 const hud = $('#hud');
 const start = $('#start');
 const over = $('#over');
+const done = $('#done');
 const banner = $('#banner');
 const toast = $('#toast');
 const hurt = $('#hurt');
@@ -46,6 +47,7 @@ function renderTexts(): void {
   $('.play').textContent = t('play');
   $('.again').textContent = t('again');
   $('.dead').textContent = t('dead');
+  $('.next').textContent = t('nextLevel');
   const touch = window.matchMedia('(pointer: coarse)').matches;
   $('.controls').textContent = touch ? t('controlsTouch') : t('controlsDesktop');
   const best = readBest();
@@ -78,14 +80,17 @@ function showToast(text: string): void {
   toastTimer = 1.2;
 }
 
-async function newGame(): Promise<void> {
+let seed = 0;
+
+async function newGame(level = 1, carry?: Carry): Promise<void> {
   sound.start();
+  if (level === 1) seed = Math.floor(Math.random() * 1e9);
   renderer?.destroy();
   renderer = null;
   game = null;
   host.innerHTML = '';
   // Slučka začne kresliť až po inicializácii renderera.
-  const next = new Game(Math.floor(Math.random() * 1e9));
+  const next = new Game(seed, level, carry);
   const view = new Renderer(next);
   await view.init(host);
   game = next;
@@ -95,13 +100,17 @@ async function newGame(): Promise<void> {
     (window as unknown as { __dp: unknown }).__dp = { game: next, renderer: view };
   start.hidden = true;
   over.hidden = true;
+  done.hidden = true;
   hud.hidden = false;
   weaponBtn.hidden = !controls.touchMode;
-  showBanner(t('waveNext', { s: 3 }), 2.5);
+  showBanner(t('level', { n: level }), 2.5);
 }
 
 $('.play').addEventListener('click', () => void newGame());
 $('.again').addEventListener('click', () => void newGame());
+$('.next').addEventListener('click', () => {
+  if (game) void newGame(game.level + 1, game.carry());
+});
 const mute = $('.mute');
 mute.addEventListener('click', () => {
   sound.setMuted(!sound.muted);
@@ -110,6 +119,7 @@ mute.addEventListener('click', () => {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !start.hidden) void newGame();
   else if (e.key === 'Enter' && !over.hidden) void newGame();
+  else if (e.key === 'Enter' && !done.hidden) $('.next').click();
   if (e.key.toLowerCase() === 'm') mute.click();
 });
 
@@ -122,28 +132,42 @@ const waveLabel = $('.wave-label');
 const stats = $('.stats');
 let lastHud = '';
 
+const livesEl = $('.lives');
+
 function updateHud(g: Game): void {
   const p = g.player;
   const ammoText = Number.isFinite(p.ammo[p.weapon]) ? String(p.ammo[p.weapon]) : '∞';
+  const horde = g.hordeRemaining;
+  const roomIndex = Math.max(0, g.room);
   const waveText =
-    g.intermission > 0 && g.wave > 0
-      ? t('waveNext', { s: Math.ceil(g.intermission) })
-      : g.wave > 0
-        ? `${t('wave', { n: g.wave })} · ${t('remaining', { n: g.remaining })}`
-        : '';
-  const key = `${p.hp}|${p.weapon}|${ammoText}|${waveText}|${g.kills}|${g.score}|${getLanguage()}`;
+    horde !== null
+      ? t('hordeLeft', { n: horde })
+      : `${t('level', { n: g.level })} · ${t('section', { i: roomIndex + 1, n: g.map.rooms.length })}`;
+  const key = `${p.hp}|${p.weapon}|${ammoText}|${waveText}|${g.kills}|${g.score}|${g.lives}|${getLanguage()}`;
   if (key === lastHud) return;
   lastHud = key;
   hpFill.style.width = `${(p.hp / g.maxHp) * 100}%`;
   weaponName.textContent = t(p.weapon);
   ammo.textContent = ammoText;
   waveLabel.textContent = waveText;
+  livesEl.textContent = '♥'.repeat(Math.max(0, g.lives));
   stats.textContent = `${t('kills')} ${g.kills} · ${t('score')} ${g.score}`;
 }
 
 function react(events: GameEvent[], g: Game): void {
   for (const e of events) {
-    if (e.type === 'wave') showBanner(t('wave', { n: e.wave }));
+    if (e.type === 'horde') showBanner(t('horde'), 1.6);
+    if (e.type === 'cleared') showBanner(t('cleared'), 1.6);
+    if (e.type === 'died' && e.lives > 0) showBanner(t('died', { n: e.lives }), 1.6);
+    if (e.type === 'room' && e.room === g.map.rooms.length - 1) showBanner(t('reachExit'), 2);
+    if (e.type === 'levelComplete') {
+      setTimeout(() => {
+        $('.done-title').textContent = t('levelDone', { n: e.level });
+        $('.done-summary').textContent = t('levelSummary', { kills: g.kills, score: g.score });
+        done.hidden = false;
+        weaponBtn.hidden = true;
+      }, 900);
+    }
     if (e.type === 'hurt') {
       hurt.style.opacity = '1';
       setTimeout(() => (hurt.style.opacity = '0'), 120);
@@ -167,7 +191,11 @@ function react(events: GameEvent[], g: Game): void {
           // úložisko nedostupné
         }
       setTimeout(() => {
-        $('.summary').textContent = t('summary', { wave: g.wave, kills: g.kills, score: g.score });
+        $('.summary').textContent = t('summary', {
+          level: g.level,
+          kills: g.kills,
+          score: g.score,
+        });
         $('.record').textContent = record
           ? t('newBest')
           : `${t('best')}: ${Math.max(best, g.score)}`;

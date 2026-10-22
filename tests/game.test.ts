@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { FlowField, UNREACHABLE } from '@/game/flowfield';
 import { castRay, lineOfSight, moveCircle, visibilityFan } from '@/game/geometry';
-import { Game, waveComposition, type Input } from '@/game/game';
-import { generateCity, isOpaque, isSolid, Tile, TILE, tileAt } from '@/game/map';
+import { Game, hordeComposition, type Input } from '@/game/game';
+import { generateLevel, isSolid, setGate, Tile, TILE, tileAt } from '@/game/map';
 
 const idle: Input = {
   moveX: 0,
@@ -13,53 +13,57 @@ const idle: Input = {
   selectWeapon: null,
 };
 
-describe('mesto', () => {
-  it('je deterministické a štart je voľný a prepojený s väčšinou ulíc', () => {
-    const a = generateCity(7);
-    const b = generateCity(7);
-    expect(a.tiles).toEqual(b.tiles);
-    const sx = Math.floor(a.spawn.x / TILE);
-    const sy = Math.floor(a.spawn.y / TILE);
-    expect(isSolid(a, sx, sy)).toBe(false);
+const tileIndex = (map: ReturnType<typeof generateLevel>, x: number, y: number) =>
+  Math.floor(y / TILE) * map.width + Math.floor(x / TILE);
+
+/** Políčko vo vnútri úseku (stred), kam sa dá postaviť. */
+function insideRoom(game: Game, index: number) {
+  const room = game.map.rooms[index]!;
+  for (let r = 0; r < 10; r++)
+    for (let y = room.y0 + 2; y <= room.y1 - 2; y++)
+      for (let x = room.x0 + 2; x <= room.x1 - 2; x++)
+        if (!isSolid(game.map, x, y)) return { x: (x + 0.5) * TILE, y: (y + 0.5) * TILE };
+  throw new Error('úsek bez voľného miesta');
+}
+
+describe('úroveň', () => {
+  it.each([1, 3, 6])('úroveň %i: deterministická, úseky sú prepojené až k heliportu', (level) => {
+    const a = generateLevel(11, level);
+    expect(generateLevel(11, level).tiles).toEqual(a.tiles);
+    expect(a.rooms).toHaveLength(Math.min(12, 5 + level));
+    expect(a.rooms[0]!.encounter).toBe('start');
+    expect(a.rooms.at(-1)!.encounter).toBe('exit');
+    expect(a.rooms.filter((r) => r.encounter === 'horde').length).toBeGreaterThanOrEqual(1);
+    expect(isSolid(a, Math.floor(a.spawn.x / TILE), Math.floor(a.spawn.y / TILE))).toBe(false);
+    // So všetkými bránami otvorenými vedie cesta zo štartu k heliportu.
+    for (const g of a.gates) setGate(a, g.id, true);
     const flow = new FlowField(a);
-    flow.update(a.spawn.x, a.spawn.y);
-    let free = 0;
-    let reachable = 0;
-    for (let i = 0; i < a.tiles.length; i++) {
-      if (isSolid(a, i % a.width, Math.floor(i / a.width))) continue;
-      free++;
-      if (flow.dist[i] !== UNREACHABLE) reachable++;
-    }
-    expect(reachable / free).toBeGreaterThan(0.9);
-    expect(a.lamps.length).toBeGreaterThan(5);
+    flow.update(a.exit.x, a.exit.y);
+    expect(flow.dist[tileIndex(a, a.spawn.x, a.spawn.y)]).not.toBe(UNREACHABLE);
+    // Každý vstup do úseku je dostupný.
+    for (const room of a.rooms)
+      expect(flow.dist[tileIndex(a, room.entry.x, room.entry.y)]).not.toBe(UNREACHABLE);
   });
 
-  it('okolo mapy je plot: nedá sa prejsť, ale svetlo presvieti von', () => {
-    const map = generateCity(1);
-    for (let x = 0; x < map.width; x++) {
-      expect(tileAt(map, x, 0)).toBe(Tile.Fence);
-      expect(tileAt(map, x, map.height - 1)).toBe(Tile.Fence);
-    }
-    for (let y = 0; y < map.height; y++) expect(tileAt(map, 0, y)).toBe(Tile.Fence);
-    expect(isSolid(map, 0, 5)).toBe(true);
-    expect(isSolid(map, map.width, 3)).toBe(true);
-    expect(isOpaque(map, 0, 5)).toBe(false);
-    expect(isOpaque(map, -3, 5)).toBe(false);
+  it('brána von z hordy je na začiatku zavretá, mreže prepúšťajú svetlo', () => {
+    const map = generateLevel(4, 2);
+    const horde = map.rooms.find((r) => r.encounter === 'horde')!;
+    const gate = map.gates[horde.doorOut!]!;
+    expect(gate.open).toBe(false);
+    const [first] = gate.tiles;
+    const tx = first! % map.width;
+    const ty = Math.floor(first! / map.width);
+    expect(tileAt(map, tx, ty)).toBe(Tile.Gate);
+    expect(isSolid(map, tx, ty)).toBe(true);
   });
 });
 
 describe('geometria', () => {
-  const map = generateCity(3);
+  const map = generateLevel(3);
   const at = map.spawn;
 
-  it('lúč sa zastaví o budovu a viditeľnosť je polygón', () => {
-    // Pevná prekážka (najneskôr plot) zastaví lúč v každom smere.
-    expect(castRay(map, at.x, at.y, 1, 0, 2000, isSolid)).toBeLessThan(2000);
-    // Svetlo cez plot presvieti von, budovy ho však zastavia v niektorom smere.
-    const light = [0, 1, 2, 3].map((k) =>
-      castRay(map, at.x, at.y, Math.cos((k * Math.PI) / 2), Math.sin((k * Math.PI) / 2), 2000),
-    );
-    expect(Math.min(...light)).toBeLessThan(2000);
+  it('lúč sa zastaví o stenu a viditeľnosť je polygón', () => {
+    expect(castRay(map, at.x, at.y, 1, 0, 4000, isSolid)).toBeLessThan(4000);
     const fan = visibilityFan(map, at.x, at.y, 150, 0, Math.PI / 3, 20);
     expect(fan.length).toBe(2 + 21 * 2);
     expect(lineOfSight(map, at, at)).toBe(true);
@@ -67,39 +71,78 @@ describe('geometria', () => {
 
   it('kruh sa nedá zatlačiť do steny', () => {
     const pos = { x: at.x, y: at.y };
-    for (let i = 0; i < 400; i++) moveCircle(map, pos, 5, 3, 0);
-    const tx = Math.floor((pos.x + 5) / TILE);
+    for (let i = 0; i < 400; i++) moveCircle(map, pos, 5, 0, -3);
     expect(isSolid(map, Math.floor(pos.x / TILE), Math.floor(pos.y / TILE))).toBe(false);
-    expect(isSolid(map, tx + 1, Math.floor(pos.y / TILE)) || pos.x > at.x).toBe(true);
   });
 });
 
 describe('hra', () => {
-  it('vlny rastú a pribúdajú bežci aj obri', () => {
-    const w1 = waveComposition(1);
-    const w5 = waveComposition(5);
-    const total = (w: typeof w1) => w.walker + w.runner + w.brute;
-    expect(total(w5)).toBeGreaterThan(total(w1));
-    expect(w5.runner).toBeGreaterThan(w1.runner);
-    expect(w1.brute).toBe(0);
-    expect(w5.brute).toBeGreaterThan(0);
+  it('hordy rastú s úrovňou', () => {
+    const total = (c: ReturnType<typeof hordeComposition>) => c.walker + c.runner + c.brute;
+    expect(total(hordeComposition(4))).toBeGreaterThan(total(hordeComposition(1)));
+    expect(hordeComposition(1).brute).toBe(0);
+    expect(hordeComposition(4).brute).toBeGreaterThan(0);
   });
 
-  it('prvá vlna príde po odpočte, zombie idú k hráčovi a dá sa ich zastreliť', () => {
-    const game = new Game(5);
-    for (let i = 0; i < 4 * 60; i++) game.update(1 / 60, idle);
-    expect(game.wave).toBe(1);
-    expect(game.takeEvents().some((e) => e.type === 'wave')).toBe(true);
-    // Zombie priamo pred hráčom: pištoľ ju po pár výstreloch zloží.
-    game.zombies = [];
+  it('vstup do hordy zavrie bránu za hráčom, po vyčistení sa brány otvoria', () => {
+    const game = new Game(4, 2);
+    const index = game.map.rooms.findIndex((r) => r.encounter === 'horde');
+    const room = game.map.rooms[index]!;
+    Object.assign(game.player, insideRoom(game, index));
+    game.update(1 / 60, idle);
+    const events = game.takeEvents();
+    expect(events.some((e) => e.type === 'horde')).toBe(true);
+    expect(game.map.gates[room.doorIn!]!.open).toBe(false);
+    expect(game.checkpoint).toBe(index);
+    // Všetky zombie hordy „zastrelené“ hneď po objavení.
+    for (let i = 0; i < 60 * 40 && game.hordeRemaining !== null; i++) {
+      game.zombies = game.zombies.filter((z) => z.room !== index);
+      game.update(1 / 60, idle);
+    }
+    expect(game.hordeRemaining).toBeNull();
+    expect(game.map.gates[room.doorIn!]!.open).toBe(true);
+    expect(game.map.gates[room.doorOut!]!.open).toBe(true);
+    expect(game.takeEvents().some((e) => e.type === 'cleared')).toBe(true);
+  });
+
+  it('smrť vráti hráča na kontrolný bod, po poslednom živote hra skončí', () => {
+    const game = new Game(9);
     const p = game.player;
-    const z = game.spawnZombie('walker', p.x + 30, p.y);
-    if (castRay(game.map, p.x, p.y, 1, 0, 40) < 30) return; // stena hneď vedľa štartu
-    const shoot: Input = { ...idle, aim: 0, firing: true };
-    for (let i = 0; i < 120 && game.zombies.includes(z); i++) game.update(1 / 60, shoot);
-    expect(game.zombies.includes(z)).toBe(false);
-    expect(game.kills).toBe(1);
-    expect(game.takeEvents().some((e) => e.type === 'kill')).toBe(true);
+    p.hp = 1;
+    game.spawnZombie('brute', p.x + 4, p.y);
+    for (let i = 0; i < 60 * 5 && game.lives === 3; i++) game.update(1 / 60, idle);
+    expect(game.lives).toBe(2);
+    for (let i = 0; i < 60 * 3; i++) game.update(1 / 60, idle);
+    expect(p.hp).toBe(game.maxHp);
+    expect(
+      Math.hypot(p.x - game.map.rooms[0]!.entry.x, p.y - game.map.rooms[0]!.entry.y),
+    ).toBeLessThan(1);
+    game.lives = 1;
+    p.hp = 1;
+    p.hurt = 0;
+    for (let i = 0; i < 6; i++) game.spawnZombie('brute', p.x + 4, p.y + 2);
+    for (let i = 0; i < 60 * 10 && !game.over; i++) game.update(1 / 60, idle);
+    expect(game.over).toBe(true);
+  });
+
+  it('heliport dokončí úroveň a výbava prejde do ďalšej', () => {
+    const game = new Game(7, 1);
+    game.player.owned.push('shotgun');
+    game.player.ammo.shotgun = 12;
+    game.score = 500;
+    const last = game.map.rooms.length - 1;
+    Object.assign(game.player, insideRoom(game, last));
+    game.update(1 / 60, idle);
+    Object.assign(game.player, { x: game.map.exit.x, y: game.map.exit.y });
+    game.update(1 / 60, idle);
+    expect(game.complete).toBe(true);
+    expect(game.takeEvents().some((e) => e.type === 'levelComplete')).toBe(true);
+    const next = new Game(7, 2, game.carry());
+    expect(next.level).toBe(2);
+    expect(next.player.owned).toContain('shotgun');
+    expect(next.player.ammo.shotgun).toBe(12);
+    expect(next.score).toBe(500);
+    expect(next.lives).toBe(4);
   });
 
   it('brokovnica zabije každú zombie najviac raz', () => {
@@ -113,14 +156,5 @@ describe('hra', () => {
     game.update(1 / 60, { ...idle, aim: 0, firing: true });
     expect(game.kills).toBe(1);
     expect(game.takeEvents().filter((e) => e.type === 'kill')).toHaveLength(1);
-  });
-
-  it('zombie pri hráčovi ubližuje a hra skončí', () => {
-    const game = new Game(9);
-    const p = game.player;
-    for (let i = 0; i < 6; i++) game.spawnZombie('brute', p.x + 4, p.y + 4);
-    for (let i = 0; i < 60 * 20 && !game.over; i++) game.update(1 / 60, idle);
-    expect(game.over).toBe(true);
-    expect(p.hp).toBe(0);
   });
 });

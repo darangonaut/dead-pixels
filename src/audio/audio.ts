@@ -136,9 +136,27 @@ export class Sound {
         case 'pickup':
           this.tone('square', 520, 880, 0.12, 0.12);
           break;
-        case 'wave':
+        case 'horde':
+          // Rev hordy: nízky hukot a šum.
           this.tone('sawtooth', 90, 45, 1.4, 0.25);
-          this.burst(1.2, 200, 0.2, 1, 0.1);
+          this.tone('sawtooth', 70, 38, 1.6, 0.18);
+          this.burst(1.2, 260, 0.25, 1, 0.1);
+          break;
+        case 'gate':
+          // Kovové zabuchnutie / zaškrípanie mreží.
+          this.tone('square', e.open ? 300 : 140, e.open ? 520 : 70, 0.25, 0.12);
+          this.burst(0.2, 1200, 0.3, 4);
+          break;
+        case 'cleared':
+          this.tone('square', 392, 392, 0.12, 0.1);
+          setTimeout(() => this.ctx && this.tone('square', 523, 523, 0.2, 0.1), 130);
+          break;
+        case 'levelComplete':
+          this.tone('square', 392, 784, 0.6, 0.12);
+          this.burst(1.5, 300, 0.2, 2);
+          break;
+        case 'died':
+          this.tone('sawtooth', 220, 50, 1.2, 0.25);
           break;
         case 'gameover':
           this.tone('sawtooth', 200, 30, 1.8, 0.3);

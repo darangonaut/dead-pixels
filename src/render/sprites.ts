@@ -1,4 +1,4 @@
-import { TILE, Tile, type CityMap } from '@/game/map';
+import { PARKING_LINE, ROAD_LINE_H, ROAD_LINE_V, TILE, Tile, type CityMap } from '@/game/map';
 import type { ZombieKind } from '@/game/game';
 import type { WeaponId } from '@/game/weapons';
 import { PixelCanvas, pixelNoise, shade, type Rgb } from './PixelCanvas';
@@ -58,6 +58,19 @@ function sidewalk(pc: PixelCanvas, x0: number, y0: number): void {
       if (pixelNoise(x0 + x, y0 + y, 23) < 0.03) pc.set(x0 + x, y0 + y, C.curb);
 }
 
+function concrete(pc: PixelCanvas, x0: number, y0: number): void {
+  pc.fillRect(x0, y0, TILE, TILE, 0x4a4d55);
+  for (let y = 0; y < TILE; y++)
+    for (let x = 0; x < TILE; x++) {
+      const n = pixelNoise(x0 + x, y0 + y, 17);
+      if (n < 0.05) pc.set(x0 + x, y0 + y, 0x3c3f46);
+      else if (n > 0.985) pc.set(x0 + x, y0 + y, 0x5c606a);
+    }
+  // Škáry medzi panelmi.
+  if ((x0 / TILE) % 3 === 0) pc.fillRect(x0, y0, 1, TILE, 0x3a3d44);
+  if ((y0 / TILE) % 3 === 0) pc.fillRect(x0, y0, TILE, 1, 0x3a3d44);
+}
+
 function grass(pc: PixelCanvas, x0: number, y0: number): void {
   pc.fillRect(x0, y0, TILE, TILE, C.grass);
   for (let y = 0; y < TILE; y++)
@@ -89,8 +102,23 @@ export function drawGround(map: CityMap): PixelCanvas {
           break;
         case Tile.Grass:
         case Tile.Tree:
-        case Tile.Fence:
           grass(pc, x0, y0);
+          break;
+        case Tile.Floor:
+        case Tile.Pillar:
+          concrete(pc, x0, y0);
+          break;
+        case Tile.Helipad:
+          asphalt(pc, x0, y0);
+          break;
+        case Tile.Gate:
+        case Tile.Door:
+          // Prah brány: tmavý pás so žltými výstražnými pruhmi.
+          pc.fillRect(x0, y0, TILE, TILE, C.asphaltDark);
+          for (let i = 0; i < TILE; i++)
+            for (let k = 0; k < TILE; k++)
+              if (((i + k) >> 2) % 2 === 0 && (i < 2 || i > 13 || k < 2 || k > 13))
+                pc.set(x0 + i, y0 + k, 0x8a7020);
           break;
         default:
           sidewalk(pc, x0, y0);
@@ -105,17 +133,44 @@ export function drawGround(map: CityMap): PixelCanvas {
     }
   }
 
-  // Prerušovaná stredová čiara v uliciach (stred 4 políčok širokej ulice).
-  const period = 17;
+  // Značenie: stredová čiara ulíc, parkovacie čiary, stĺpy v sklade, heliport.
   for (let y = 0; y < map.height; y++)
     for (let x = 0; x < map.width; x++) {
-      if (at(x, y) !== Tile.Road) continue;
-      if (y % period === 2 && at(x, y - 1) === Tile.Road)
-        for (let i = 0; i < TILE; i++)
-          if ((x * TILE + i) % 12 < 6) pc.set(x * TILE + i, y * TILE, C.line);
-      if (x % period === 2 && at(x - 1, y) === Tile.Road)
-        for (let i = 0; i < TILE; i++)
-          if ((y * TILE + i) % 12 < 6) pc.set(x * TILE, y * TILE + i, C.line);
+      const v = map.variant[y * map.width + x]!;
+      const t = at(x, y);
+      const x0 = x * TILE;
+      const y0 = y * TILE;
+      if (t === Tile.Road && v === ROAD_LINE_H)
+        for (let i = 0; i < TILE; i++) if ((x0 + i) % 12 < 6) pc.set(x0 + i, y0 + 7, C.line);
+      if (t === Tile.Road && v === ROAD_LINE_V)
+        for (let i = 0; i < TILE; i++) if ((y0 + i) % 12 < 6) pc.set(x0 + 7, y0 + i, C.line);
+      if ((t === Tile.Road || t === Tile.Car) && v === PARKING_LINE)
+        pc.fillRect(x0 + 15, y0, 1, TILE, 0xb8bcc4);
+      if (t === Tile.Pillar) {
+        pc.fillRect(x0 + 3, y0 + 3, 10, 10, 0x5a5e66);
+        pc.fillRect(x0 + 3, y0 + 3, 10, 2, 0x7a7e88);
+        pc.fillRect(x0 + 11, y0 + 3, 2, 10, 0x40444c);
+      }
+    }
+  // Heliport: kruh a písmeno H cez celú plochu 4 × 4 políčok.
+  for (let y = 1; y < map.height - 1; y++)
+    for (let x = 1; x < map.width - 1; x++) {
+      if (
+        at(x, y) !== Tile.Helipad ||
+        at(x - 1, y) === Tile.Helipad ||
+        at(x, y - 1) === Tile.Helipad
+      )
+        continue;
+      const cx = x * TILE + 32;
+      const cy = y * TILE + 32;
+      for (let yy = -32; yy < 32; yy++)
+        for (let xx = -32; xx < 32; xx++) {
+          const d = Math.hypot(xx + 0.5, yy + 0.5);
+          if (d > 26 && d < 30) pc.set(cx + xx, cy + yy, 0xd8d0b0);
+        }
+      pc.fillRect(cx - 12, cy - 14, 5, 28, 0xd8d0b0);
+      pc.fillRect(cx + 7, cy - 14, 5, 28, 0xd8d0b0);
+      pc.fillRect(cx - 7, cy - 2, 14, 5, 0xd8d0b0);
     }
 
   return pc;
@@ -211,8 +266,6 @@ export function drawProps(map: CityMap): PixelCanvas {
       } else if (t === Tile.Lamp) {
         pc.fillRect(cx - 2, cy - 2, 5, 5, C.metalDark);
         pc.fillRect(cx - 1, cy - 1, 3, 3, C.yellow);
-      } else if (t === Tile.Fence) {
-        drawFenceTile(pc, map, x, y);
       } else if (t === Tile.Crate) {
         pc.fillRect(x * TILE + 2, y * TILE + 2, 12, 12, C.wood);
         for (let i = 0; i < 12; i++) {
@@ -222,86 +275,6 @@ export function drawProps(map: CityMap): PixelCanvas {
         pc.fillRect(x * TILE + 2, y * TILE + 2, 12, 1, C.woodDark);
         pc.fillRect(x * TILE + 2, y * TILE + 13, 12, 1, C.woodDark);
       }
-    }
-  return pc;
-}
-
-const FENCE = 0x9aa0aa;
-const FENCE_DARK = 0x5f6570;
-
-/**
- * Drôtený plot na okrajovom políčku: pletivo pri vnútornej hrane (hráč sa oň opiera)
- * a stĺpiky každé políčko.
- */
-function drawFenceTile(pc: PixelCanvas, map: CityMap, x: number, y: number): void {
-  const x0 = x * TILE;
-  const y0 = y * TILE;
-  const top = y === 0;
-  const bottom = y === map.height - 1;
-  const left = x === 0;
-  const right = x === map.width - 1;
-  const mesh = (px: number, py: number) =>
-    pc.set(px, py, (px + py) % 3 === 0 ? FENCE : FENCE_DARK, (px + py) % 3 === 0 ? 255 : 170);
-  // Pletivo ako pás 3 px pri hrane smerom do mesta, s diagonálnym vzorom.
-  if (top || bottom) {
-    const row = top ? y0 + TILE - 4 : y0 + 1;
-    for (let i = 0; i < TILE; i++) for (let k = 0; k < 3; k++) mesh(x0 + i, row + k);
-    pc.fillRect(x0, top ? row - 1 : row + 3, TILE, 1, FENCE_DARK);
-  }
-  if (left || right) {
-    const col = left ? x0 + TILE - 4 : x0 + 1;
-    for (let i = 0; i < TILE; i++) for (let k = 0; k < 3; k++) mesh(col + k, y0 + i);
-    pc.fillRect(left ? col - 1 : col + 3, y0, 1, TILE, FENCE_DARK);
-  }
-  // Stĺpiky (aj v rohoch).
-  const postX = left ? x0 + TILE - 5 : right ? x0 + 1 : x0 + 6;
-  const postY = top ? y0 + TILE - 5 : bottom ? y0 + 1 : y0 + 6;
-  pc.fillRect(postX, postY, 4, 4, FENCE_DARK);
-  pc.fillRect(postX + 1, postY + 1, 2, 2, FENCE);
-  // Tu a tam burina pri plote.
-  if (pixelNoise(x, y, 81) < 0.4) {
-    pc.set(x0 + 3, y0 + 4, C.grassLight);
-    pc.set(x0 + 11, y0 + 10, C.grassLight);
-  }
-}
-
-/** Okolie za plotom: zarastená tráva, burina a stromy (mimo hracej plochy). */
-export function drawOutskirts(map: CityMap, margin: number): PixelCanvas {
-  const w = (map.width + margin * 2) * TILE;
-  const h = (map.height + margin * 2) * TILE;
-  const pc = new PixelCanvas(w, h);
-  for (let ty = 0; ty < map.height + margin * 2; ty++)
-    for (let tx = 0; tx < map.width + margin * 2; tx++) {
-      const inside =
-        tx >= margin && ty >= margin && tx < map.width + margin && ty < map.height + margin;
-      if (inside) continue;
-      grass(pc, tx * TILE, ty * TILE);
-      // Tmavšie fľaky buriny a vyšliapané blato.
-      for (let yy = 0; yy < TILE; yy++)
-        for (let xx = 0; xx < TILE; xx++) {
-          const n = pixelNoise(tx * TILE + xx, ty * TILE + yy, 91);
-          if (n < 0.1) pc.set(tx * TILE + xx, ty * TILE + yy, C.leaf);
-          else if (pixelNoise(tx, ty, 92) < 0.15 && n > 0.6)
-            pc.set(tx * TILE + xx, ty * TILE + yy, 0x4a3d2a);
-        }
-    }
-  // Stromy za plotom (hustejšie ďalej od mesta).
-  for (let ty = 0; ty < map.height + margin * 2; ty++)
-    for (let tx = 0; tx < map.width + margin * 2; tx++) {
-      const dx =
-        tx < margin ? margin - tx : tx >= map.width + margin ? tx - map.width - margin + 1 : 0;
-      const dy =
-        ty < margin ? margin - ty : ty >= map.height + margin ? ty - map.height - margin + 1 : 0;
-      const depth = Math.max(dx, dy);
-      if (depth < 2 || pixelNoise(tx, ty, 93) > 0.12 + depth * 0.06) continue;
-      const cx = tx * TILE + 8;
-      const cy = ty * TILE + 8;
-      for (let yy = -9; yy <= 9; yy++)
-        for (let xx = -9; xx <= 9; xx++) {
-          if (xx * xx + yy * yy > 70 + pixelNoise(cx + xx, cy + yy, 94) * 20) continue;
-          const light = xx + yy < -5 && pixelNoise(cx + xx, cy + yy, 95) < 0.6;
-          pc.set(cx + xx, cy + yy, light ? C.leafLight : C.leaf);
-        }
     }
   return pc;
 }
@@ -432,6 +405,49 @@ export function drawPickup(kind: 'ammo' | 'health' | 'weapon', weapon?: WeaponId
 export function drawDot(color: Rgb, w = 2, h = 2): PixelCanvas {
   const pc = new PixelCanvas(w, h);
   pc.fillRect(0, 0, w, h, color);
+  return pc;
+}
+
+/** Brána z mreží (zatvorená): 3 políčka dlhá, zvislá alebo vodorovná. */
+export function drawGate(vertical: boolean): PixelCanvas {
+  const long = TILE * 3;
+  const pc = new PixelCanvas(vertical ? TILE : long, vertical ? long : TILE);
+  const bar = 0x8b93a1;
+  const dark = 0x3a3f4a;
+  if (vertical) {
+    pc.fillRect(5, 0, 6, long, dark);
+    for (let y = 1; y < long; y += 4) pc.fillRect(4, y, 8, 2, bar);
+    pc.fillRect(7, 0, 2, long, bar);
+  } else {
+    pc.fillRect(0, 5, long, 6, dark);
+    for (let x = 1; x < long; x += 4) pc.fillRect(x, 4, 2, 8, bar);
+    pc.fillRect(0, 7, long, 2, bar);
+  }
+  pc.outline(C.ink);
+  return pc;
+}
+
+/** Šípka navigácie (smer +x). */
+export function drawArrow(): PixelCanvas {
+  const pc = new PixelCanvas(9, 9);
+  pc.stamp(
+    0,
+    0,
+    [
+      '..y......',
+      '..yy.....',
+      'yyyyy....',
+      'yyyyyy...',
+      'yyyyyyy..',
+      'yyyyyy...',
+      'yyyyy....',
+      '..yy.....',
+      '..y......',
+    ],
+    {
+      y: C.yellow,
+    },
+  );
   return pc;
 }
 

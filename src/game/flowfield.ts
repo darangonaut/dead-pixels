@@ -10,6 +10,7 @@ export class FlowField {
   readonly dist: Uint16Array;
   private queue: Int32Array;
   targetTile = -1;
+  private revision = -1;
 
   constructor(private readonly map: CityMap) {
     this.dist = new Uint16Array(map.width * map.height);
@@ -21,8 +22,9 @@ export class FlowField {
     const tx = Math.floor(x / TILE);
     const ty = Math.floor(y / TILE);
     const target = ty * width + tx;
-    if (target === this.targetTile) return;
+    if (target === this.targetTile && this.map.revision === this.revision) return;
     this.targetTile = target;
+    this.revision = this.map.revision;
     this.dist.fill(UNREACHABLE);
     let head = 0;
     let tail = 0;

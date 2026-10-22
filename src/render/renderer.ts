@@ -16,8 +16,9 @@ import {
   drawBlood,
   drawCorpse,
   drawDot,
+  drawArrow,
+  drawGate,
   drawGround,
-  drawOutskirts,
   drawPickup,
   drawPlayer,
   drawProps,
@@ -116,6 +117,9 @@ export class Renderer {
     glow: Sprite;
   }[] = [];
   private hurtFlash = 0;
+  private gateSprites: Sprite[] = [];
+  private arrow = new Sprite();
+  private beacon = new Sprite();
 
   constructor(private readonly game: Game) {}
 
@@ -145,9 +149,6 @@ export class Renderer {
     light.source.scaleMode = 'linear';
     this.tex.light = light;
 
-    const margin = 12;
-    const outskirts = new Sprite(texture(drawOutskirts(map, margin)));
-    outskirts.position.set(-margin * 16, -margin * 16);
     const ground = new Sprite(texture(drawGround(map)));
     const props = new Sprite(texture(drawProps(map)));
     // Strechy nad tmou, stlmené ako v mesačnom svetle — mesto je čitateľné aj v tme.
@@ -183,15 +184,32 @@ export class Renderer {
     this.lightGfx.blendMode = 'erase';
     this.lightRoot.addChild(this.lightGfx);
     this.flashRoot.addChild(this.lightSprites);
+    // Brány (mreže): viditeľné, keď sú zatvorené.
+    this.gateSprites = map.gates.map((gate) => {
+      const sprite = new Sprite(texture(drawGate(gate.vertical)));
+      sprite.anchor.set(0.5);
+      sprite.position.set(gate.x, gate.y);
+      sprite.alpha = gate.open ? 0 : 1;
+      return sprite;
+    });
+    this.arrow = new Sprite(texture(drawArrow()));
+    this.arrow.anchor.set(0.5);
+    this.beacon = new Sprite(this.tex.light);
+    this.beacon.anchor.set(0.5);
+    this.beacon.position.set(map.exit.x, map.exit.y);
+    this.beacon.width = this.beacon.height = 120;
+    this.beacon.tint = 0xff3030;
+    this.beacon.blendMode = 'add';
     this.world.addChild(
-      outskirts,
       ground,
       new Sprite(this.decals),
       props,
+      ...this.gateSprites,
       this.pickupsLayer,
       this.actors,
       this.effects,
       this.glow,
+      this.beacon,
     );
     this.effects.addChild(this.tracerGfx);
     this.app.stage.addChild(this.world);
@@ -218,7 +236,7 @@ export class Renderer {
       this.darkSprite = new Sprite(this.dark);
       // Mäkké okraje svetla.
       this.darkSprite.filters = [new BlurFilter({ strength: 3, quality: 2 })];
-      this.world.addChild(this.darkSprite, this.roofs);
+      this.world.addChild(this.darkSprite, this.roofs, this.arrow);
     }
   }
 
@@ -281,6 +299,9 @@ export class Renderer {
             e.y + Math.sin(e.angle) * 3,
             e.angle,
           );
+          break;
+        case 'respawn':
+          this.cam = { x: this.game.player.x, y: this.game.player.y };
           break;
         case 'hurt':
           this.hurtFlash = 0.25;
@@ -360,6 +381,28 @@ export class Renderer {
       Math.round(h / 2 - (this.cam.y + sy) * this.zoom),
     );
 
+    // Brány sa plynulo objavia / zmiznú.
+    this.game.map.gates.forEach((gate, i) => {
+      const sprite = this.gateSprites[i]!;
+      const target = gate.open ? 0 : 1;
+      sprite.alpha += (target - sprite.alpha) * Math.min(1, dt * 8);
+      sprite.visible = sprite.alpha > 0.02;
+    });
+    // Šípka k ďalším dverám / heliportu (kým nie je horda).
+    const goal = game.objective;
+    const far = goal && Math.hypot(goal.x - p.x, goal.y - p.y) > 48;
+    this.arrow.visible = !!far && game.hordeRemaining === null && game.respawn <= 0;
+    if (goal && this.arrow.visible) {
+      const a = Math.atan2(goal.y - p.y, goal.x - p.x);
+      this.arrow.position.set(
+        Math.round(p.x + Math.cos(a) * 20),
+        Math.round(p.y + Math.sin(a) * 20),
+      );
+      this.arrow.rotation = a;
+      this.arrow.alpha = 0.55 + 0.35 * Math.sin(game.time * 5);
+    }
+    this.beacon.alpha = 0.25 + 0.2 * Math.sin(game.time * 4);
+    this.player.visible = game.respawn <= 0;
     this.drawTracers(dt);
     this.drawDarkness(dt);
   }
@@ -489,6 +532,18 @@ export class Renderer {
       if (!visible || !lamp.on || !flickerOn) continue;
       poly(lamp.poly, 0.55);
     }
+    // Maják heliportu pulzuje.
+    const ex = game.map.exit;
+    if (
+      ex.x > vx - 80 &&
+      ex.x < vx + this.viewW + 80 &&
+      ex.y > vy - 80 &&
+      ex.y < vy + this.viewH + 80
+    )
+      poly(
+        visibilityFan(game.map, ex.x, ex.y, 60, 0, Math.PI * 2, 48),
+        0.3 + 0.25 * Math.sin(time * 4),
+      );
     // Baterka: tri vrstvy kužeľa (mäkký okraj ďaleko), okolo hráča malý kruh.
     for (const [range, alpha] of [
       [FLASHLIGHT_RANGE, 0.45],

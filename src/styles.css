@@ -243,6 +243,29 @@ button.big {
 .logo {
   width: min(88vw, 620px);
   image-rendering: pixelated;
+  /* Logo kreslí pozadie (osvetľuje ho kužeľ baterky); obrázok drží miesto v rozložení. */
+  visibility: hidden;
+}
+
+#start {
+  background: var(--ink);
+}
+
+#start > :not(.title-bg) {
+  position: relative;
+  z-index: 1;
+}
+
+.title-bg {
+  position: absolute;
+  inset: 0;
+  image-rendering: pixelated;
+}
+
+.tagline,
+.controls,
+.best {
+  text-shadow: 2px 2px 0 var(--ink);
 }
 
 .tagline {

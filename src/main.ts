@@ -7,6 +7,7 @@ import { Controls } from './input/input';
 import { Renderer } from './render/renderer';
 import { getLanguage, setLanguage, t, type Language } from './ui/i18n';
 import { drawLogo } from './ui/logo';
+import { TitleScene } from './ui/title';
 
 const $ = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const host = $('#game');
@@ -41,7 +42,12 @@ weaponBtn.addEventListener('pointerdown', (e) => {
 
 // --- Obrazovky ---
 
-$<HTMLImageElement>('.logo').src = drawLogo().toDataURL();
+const logoCanvas = drawLogo();
+const logoImg = $<HTMLImageElement>('.logo');
+logoImg.src = logoCanvas.toDataURL();
+// Živé pozadie úvodnej obrazovky (kužeľ baterky cez logo, občas zombie).
+const title = new TitleScene(start, logoImg, logoCanvas);
+title.start();
 
 function renderTexts(): void {
   $('.tagline').textContent = t('tagline');
@@ -105,6 +111,7 @@ async function newGame(level = 1, carry?: Carry): Promise<void> {
   if (new URLSearchParams(location.search).has('debug'))
     (window as unknown as { __dp: unknown }).__dp = { game: next, renderer: view };
   start.hidden = true;
+  title.stop();
   over.hidden = true;
   done.hidden = true;
   hud.hidden = false;
@@ -157,6 +164,7 @@ $('.to-menu').addEventListener('click', () => {
   hud.hidden = true;
   weaponBtn.hidden = true;
   start.hidden = false;
+  title.start();
   renderTexts();
 });
 // Prepnutie karty / minimalizovanie okna hru pozastaví.

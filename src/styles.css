@@ -99,7 +99,7 @@ button.big {
 .hud-right {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
-  right: max(56px, calc(env(safe-area-inset-right) + 44px));
+  right: max(96px, calc(env(safe-area-inset-right) + 84px));
   text-align: right;
   text-shadow: 2px 2px 0 var(--ink);
 }
@@ -139,6 +139,35 @@ button.big {
   width: 32px;
   height: 32px;
   pointer-events: auto;
+}
+
+.pause-btn {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(52px, calc(env(safe-area-inset-right) + 40px));
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.paused-title {
+  margin: 0;
+  font-size: 54px;
+  color: var(--text);
+  text-shadow: 4px 4px 0 var(--ink);
+}
+
+#paused button:not(.big) {
+  min-width: 200px;
+  padding: 8px 16px;
+  font-size: 16px;
+}
+
+.paused-hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
 }
 
 .mute.off {

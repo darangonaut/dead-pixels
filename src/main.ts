@@ -14,6 +14,7 @@ const hud = $('#hud');
 const start = $('#start');
 const over = $('#over');
 const done = $('#done');
+const pausedScreen = $('#paused');
 const banner = $('#banner');
 const toast = $('#toast');
 const hurt = $('#hurt');
@@ -48,6 +49,11 @@ function renderTexts(): void {
   $('.again').textContent = t('again');
   $('.dead').textContent = t('dead');
   $('.next').textContent = t('nextLevel');
+  $('.paused-title').textContent = t('paused');
+  $('.resume').textContent = t('resume');
+  $('.sound-toggle').textContent = sound.muted ? t('soundOff') : t('soundOn');
+  $('.to-menu').textContent = t('toMenu');
+  $('.paused-hint').textContent = t('pausedHint');
   const touch = window.matchMedia('(pointer: coarse)').matches;
   $('.controls').textContent = touch ? t('controlsTouch') : t('controlsDesktop');
   const best = readBest();
@@ -112,15 +118,65 @@ $('.next').addEventListener('click', () => {
   if (game) void newGame(game.level + 1, game.carry());
 });
 const mute = $('.mute');
-mute.addEventListener('click', () => {
+function toggleSound(): void {
   sound.setMuted(!sound.muted);
   mute.classList.toggle('off', sound.muted);
+  $('.sound-toggle').textContent = sound.muted ? t('soundOff') : t('soundOn');
+}
+mute.addEventListener('click', toggleSound);
+
+// --- Pauza ---
+
+let paused = false;
+/** Pauza sa dá zapnúť len počas hrania (nie na obrazovkách menu, smrti, konca úrovne). */
+const playing = () =>
+  !!game && !game.over && !game.complete && start.hidden && over.hidden && done.hidden;
+
+function setPaused(next: boolean): void {
+  if (next && !playing()) return;
+  paused = next;
+  pausedScreen.hidden = !next;
+  controls.reset();
+  if (next) sound.suspend();
+  else {
+    sound.resume();
+    last = performance.now();
+    acc = 0;
+  }
+}
+
+$('.pause-btn').addEventListener('click', () => setPaused(true));
+$('.resume').addEventListener('click', () => setPaused(false));
+$('.sound-toggle').addEventListener('click', toggleSound);
+$('.to-menu').addEventListener('click', () => {
+  setPaused(false);
+  renderer?.destroy();
+  renderer = null;
+  game = null;
+  host.innerHTML = '';
+  hud.hidden = true;
+  weaponBtn.hidden = true;
+  start.hidden = false;
+  renderTexts();
 });
+// Prepnutie karty / minimalizovanie okna hru pozastaví.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) setPaused(true);
+});
+window.addEventListener('blur', () => setPaused(true));
+
 window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase();
+  if (key === 'escape' || key === 'p') {
+    if (paused) setPaused(false);
+    else setPaused(true);
+    return;
+  }
+  if (paused) return;
   if (e.key === 'Enter' && !start.hidden) void newGame();
   else if (e.key === 'Enter' && !over.hidden) void newGame();
   else if (e.key === 'Enter' && !done.hidden) $('.next').click();
-  if (e.key.toLowerCase() === 'm') mute.click();
+  if (key === 'm') toggleSound();
 });
 
 // --- HUD ---
@@ -215,7 +271,8 @@ let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (game && renderer) {
+  if (game && renderer && paused) renderer.render(0);
+  else if (game && renderer) {
     acc += dt;
     const r = renderer;
     while (acc >= STEP) {

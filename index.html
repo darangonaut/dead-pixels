@@ -25,6 +25,7 @@
         <div class="lives"></div>
         <div class="stats"></div>
       </div>
+      <button class="pause-btn" aria-label="Pauza">❚❚</button>
       <button class="mute" aria-label="Zvuk">♪</button>
     </div>
     <div id="banner"></div>
@@ -42,6 +43,13 @@
       <button class="play big"></button>
       <p class="controls"></p>
       <p class="best"></p>
+    </section>
+    <section id="paused" class="screen" hidden>
+      <h1 class="paused-title"></h1>
+      <button class="resume big"></button>
+      <button class="sound-toggle"></button>
+      <button class="to-menu"></button>
+      <p class="paused-hint"></p>
     </section>
     <section id="done" class="screen" hidden>
       <h1 class="done-title"></h1>

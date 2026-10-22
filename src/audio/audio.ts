@@ -28,6 +28,15 @@ export class Sound {
     this.ambient();
   }
 
+  /** Pauza: zastaví všetky zvuky (aj ambient). */
+  suspend(): void {
+    void this.ctx?.suspend();
+  }
+
+  resume(): void {
+    void this.ctx?.resume();
+  }
+
   setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.master) this.master.gain.value = muted ? 0 : 0.5;

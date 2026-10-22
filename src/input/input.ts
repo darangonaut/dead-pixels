@@ -176,6 +176,16 @@ export class Controls {
     return input;
   }
 
+  /** Uvoľní všetky klávesy, tlačidlá a páčky (po pauze nič neostane „zaseknuté“). */
+  reset(): void {
+    this.keys.clear();
+    this.mouse.down = false;
+    for (const stick of [this.move, this.aim]) {
+      stick.id = null;
+      this.drawStick(stick);
+    }
+  }
+
   /** Dotykové tlačidlo zbrane. */
   nextWeapon(): void {
     this.wheel = 1;

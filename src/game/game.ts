@@ -14,6 +14,15 @@ import {
 } from './map';
 import { createRng } from './rng';
 import { SpatialHash } from './spatial';
+import {
+  damageFactor,
+  flashlightFactor,
+  MAX_GRENADES,
+  maxHpFor,
+  NO_UPGRADES,
+  speedFactor,
+  type Upgrades,
+} from './shop';
 import { WEAPON_ORDER, WEAPONS, type WeaponId } from './weapons';
 
 export type ZombieKind = 'walker' | 'runner' | 'brute' | 'exploder' | 'spitter' | 'boss';
@@ -46,6 +55,17 @@ export interface Zombie {
   stateTime: number;
   dirX: number;
   dirY: number;
+  /** Horí (s) — po zásahu plameňometom. */
+  burn: number;
+}
+
+/** Hodený granát: kĺže po zemi, odráža sa od stien a po zapálenej rozbuške vybuchne. */
+export interface Grenade {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  fuse: number;
 }
 
 /** Pľuvanec kyseliny (pľujúca zombie). */
@@ -59,8 +79,10 @@ export interface Spit {
 
 export interface Pickup {
   id: number;
-  kind: 'ammo' | 'health' | 'weapon';
+  kind: 'ammo' | 'health' | 'weapon' | 'cash' | 'grenade';
   weapon?: WeaponId;
+  /** Hodnota balíka peňazí. */
+  value?: number;
   x: number;
   y: number;
   age: number;
@@ -80,6 +102,7 @@ export interface Player {
   /** Krátka nezraniteľnosť po zásahu (s). */
   hurt: number;
   step: number;
+  grenades: number;
 }
 
 /** Čo si hráč nesie do ďalšej úrovne. */
@@ -90,7 +113,20 @@ export interface Carry {
   score: number;
   kills: number;
   lives: number;
+  cash: number;
+  grenades: number;
+  upgrades: Upgrades;
 }
+
+/** Peniaze za zabitie podľa druhu zombie. */
+export const CASH_PER_KILL: Readonly<Record<ZombieKind, number>> = {
+  walker: 2,
+  runner: 3,
+  brute: 8,
+  exploder: 4,
+  spitter: 4,
+  boss: 120,
+};
 
 export interface Input {
   /** Pohyb (-1..1). */
@@ -102,6 +138,9 @@ export interface Input {
   /** Prepnutie zbrane: +1 / -1, alebo null. */
   switchWeapon: number | null;
   selectWeapon: number | null;
+  /** Hodiť granát; `throwDistance` = ako ďaleko (px), inak predvolene. */
+  throwGrenade?: boolean;
+  throwDistance?: number | null;
 }
 
 export type GameEvent =
@@ -124,12 +163,14 @@ export type GameEvent =
   | { type: 'boss'; room: number }
   | { type: 'bossWindup'; x: number; y: number }
   | { type: 'bossStun'; x: number; y: number }
+  | { type: 'flame'; x: number; y: number; angle: number }
+  | { type: 'throw'; x: number; y: number }
+  | { type: 'barrel'; tile: number }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
 const PLAYER_SPEED = 72;
 const ZOMBIE_RADIUS = 5;
-const MAX_HP = 100;
 const AWARE_RANGE = 150;
 const RESPAWN_DELAY = 1.6;
 
@@ -175,6 +216,11 @@ export class Game {
   zombies: Zombie[] = [];
   pickups: Pickup[] = [];
   spits: Spit[] = [];
+  grenades: Grenade[] = [];
+  cash: number;
+  readonly upgrades: Upgrades;
+  /** Výbuchy, ktoré prídu o chvíľu (reťaz sudov). */
+  private pendingBlasts: { x: number; y: number; t: number }[] = [];
   readonly flow: FlowField;
   score: number;
   kills: number;
@@ -209,17 +255,22 @@ export class Game {
     this.score = carry?.score ?? 0;
     this.kills = carry?.kills ?? 0;
     this.lives = carry?.lives ?? 3;
+    this.cash = carry?.cash ?? 0;
+    this.upgrades = carry ? { ...carry.upgrades } : { ...NO_UPGRADES };
     this.player = {
       x: this.map.spawn.x,
       y: this.map.spawn.y,
       angle: 0,
-      hp: MAX_HP,
+      hp: maxHpFor(this.upgrades),
       weapon: carry?.weapon ?? 'pistol',
-      ammo: carry ? { ...carry.ammo } : { pistol: Infinity, shotgun: 0, smg: 0 },
+      ammo: carry
+        ? { ...carry.ammo, flamer: carry.ammo.flamer ?? 0 }
+        : { pistol: Infinity, shotgun: 0, smg: 0, flamer: 0 },
       owned: carry ? [...carry.owned] : ['pistol'],
       cooldown: 0,
       hurt: 0,
       step: 0,
+      grenades: carry?.grenades ?? 2,
     };
     // Zásoby položené v úsekoch.
     for (const room of this.map.rooms)
@@ -227,6 +278,7 @@ export class Game {
         this.pickups.push({
           id: this.nextId++,
           kind: item.kind,
+          value: item.kind === 'cash' ? 20 + this.level * 5 : undefined,
           x: item.x,
           y: item.y,
           age: 0,
@@ -245,6 +297,9 @@ export class Game {
       score: this.score,
       kills: this.kills,
       lives: this.lives + 1,
+      cash: this.cash,
+      grenades: p.grenades,
+      upgrades: { ...this.upgrades },
     };
   }
 
@@ -277,6 +332,7 @@ export class Game {
     this.updateHorde(dt);
     this.updateZombies(dt);
     this.updateSpits(dt);
+    this.updateGrenades(dt);
     this.updatePickups(dt);
     // Cieľ: heliport.
     const exit = this.map.exit;
@@ -305,7 +361,8 @@ export class Game {
       my /= len;
     }
     if (len > 0.05) p.step += dt * 10 * Math.min(1, len);
-    moveCircle(this.map, p, PLAYER_RADIUS, mx * PLAYER_SPEED * dt, my * PLAYER_SPEED * dt);
+    const speed = PLAYER_SPEED * speedFactor(this.upgrades);
+    moveCircle(this.map, p, PLAYER_RADIUS, mx * speed * dt, my * speed * dt);
     if (input.aim !== null) p.angle = input.aim;
     p.hurt = Math.max(0, p.hurt - dt);
 
@@ -322,6 +379,92 @@ export class Game {
 
     p.cooldown = Math.max(0, p.cooldown - dt);
     if (input.firing && p.cooldown === 0) this.fire();
+    if (input.throwGrenade && p.grenades > 0) this.throwGrenade(input.throwDistance ?? 90);
+  }
+
+  private throwGrenade(distance: number): void {
+    const p = this.player;
+    p.grenades--;
+    // Rýchlosť tak, aby granát s trením doletel približne na zadanú vzdialenosť.
+    const d = Math.max(30, Math.min(150, distance));
+    const v = d * 3;
+    this.grenades.push({
+      x: p.x + Math.cos(p.angle) * 6,
+      y: p.y + Math.sin(p.angle) * 6,
+      vx: Math.cos(p.angle) * v,
+      vy: Math.sin(p.angle) * v,
+      fuse: 1.1,
+    });
+    this.events.push({ type: 'throw', x: p.x, y: p.y });
+  }
+
+  private updateGrenades(dt: number): void {
+    for (const g of this.grenades) {
+      g.fuse -= dt;
+      const f = Math.exp(-3 * dt);
+      g.vx *= f;
+      g.vy *= f;
+      // Odraz od pevných prekážok (po osiach).
+      const nx = g.x + g.vx * dt;
+      if (isSolid(this.map, Math.floor(nx / TILE), Math.floor(g.y / TILE))) g.vx *= -0.5;
+      else g.x = nx;
+      const ny = g.y + g.vy * dt;
+      if (isSolid(this.map, Math.floor(g.x / TILE), Math.floor(ny / TILE))) g.vy *= -0.5;
+      else g.y = ny;
+    }
+    for (const g of this.grenades.filter((g) => g.fuse <= 0)) this.explode(g.x, g.y, 'grenade');
+    this.grenades = this.grenades.filter((g) => g.fuse > 0);
+    // Reťaz sudov: výbuchy s malým oneskorením.
+    for (const b of this.pendingBlasts) b.t -= dt;
+    const due = this.pendingBlasts.filter((b) => b.t <= 0);
+    this.pendingBlasts = this.pendingBlasts.filter((b) => b.t > 0);
+    for (const b of due) this.explode(b.x, b.y, 'barrel');
+  }
+
+  /** Plameňomet: kužeľ ohňa zraní a zapáli zombie, zapáli aj sudy. */
+  private flame(): void {
+    const p = this.player;
+    const def = WEAPONS.flamer;
+    const dmg = def.damage * damageFactor(this.upgrades);
+    for (const z of this.hash.near(p.x, p.y, def.range + 12, this.nearby)) {
+      if (z.hp <= 0) continue;
+      const dx = z.x - p.x;
+      const dy = z.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d > def.range + ZOMBIES[z.kind].radius) continue;
+      let diff = Math.atan2(dy, dx) - p.angle;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      if (Math.abs(diff) > def.spread / 2 || !lineOfSight(this.map, p, z)) continue;
+      z.hp -= dmg;
+      z.burn = 3;
+      z.aware = true;
+      if (z.hp <= 0) this.killZombie(z, p.angle);
+    }
+    // Sudy v plameni.
+    for (let k = 1; k <= 4; k++) {
+      const x = p.x + Math.cos(p.angle) * k * 14;
+      const y = p.y + Math.sin(p.angle) * k * 14;
+      const tx = Math.floor(x / TILE);
+      const ty = Math.floor(y / TILE);
+      if (tileAt(this.map, tx, ty) === Tile.Barrel) this.destroyBarrel(tx, ty, 0.3);
+      if (isOpaque(this.map, tx, ty)) break;
+    }
+    this.events.push({
+      type: 'flame',
+      x: p.x + Math.cos(p.angle) * 8,
+      y: p.y + Math.sin(p.angle) * 8,
+      angle: p.angle,
+    });
+  }
+
+  /** Sud vybuchne (o chvíľu) a zmizne z mapy. */
+  private destroyBarrel(tx: number, ty: number, delay = 0.12): void {
+    const i = ty * this.map.width + tx;
+    if (this.map.tiles[i] !== Tile.Barrel) return;
+    this.map.tiles[i] = this.map.variant[i]!;
+    this.map.revision++;
+    this.events.push({ type: 'barrel', tile: i });
+    this.pendingBlasts.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, t: delay });
   }
 
   private fire(): void {
@@ -329,11 +472,24 @@ export class Game {
     const weapon = WEAPONS[p.weapon];
     p.cooldown = 1 / weapon.rate;
     if (Number.isFinite(p.ammo[p.weapon])) p.ammo[p.weapon]--;
+    if (p.weapon === 'flamer') {
+      this.flame();
+      for (const z of this.hash.near(p.x, p.y, 100, this.nearby)) z.aware = true;
+      return;
+    }
     const muzzle = { x: p.x + Math.cos(p.angle) * 7, y: p.y + Math.sin(p.angle) * 7 };
     const hits: Vec[] = [];
     for (let i = 0; i < weapon.pellets; i++) {
       const angle = p.angle + (this.rng() - 0.5) * weapon.spread;
-      hits.push(this.hitscan(muzzle, angle, weapon.range, weapon.damage, weapon.knockback));
+      hits.push(
+        this.hitscan(
+          muzzle,
+          angle,
+          weapon.range,
+          weapon.damage * damageFactor(this.upgrades),
+          weapon.knockback,
+        ),
+      );
     }
     this.events.push({
       type: 'shot',
@@ -352,6 +508,10 @@ export class Game {
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
     const wall = castRay(this.map, from.x, from.y, dx, dy, range, isSolidForBullets);
+    // Zásah suda: o kúsok za bodom dopadu.
+    const hx = Math.floor((from.x + dx * (wall + 1)) / TILE);
+    const hy = Math.floor((from.y + dy * (wall + 1)) / TILE);
+    const barrelHit = wall < range && tileAt(this.map, hx, hy) === Tile.Barrel;
     let best: Zombie | null = null;
     let bestT = wall;
     for (const z of this.hash.near(
@@ -383,7 +543,7 @@ export class Game {
       if (best.kind === 'boss') best.stagger = 0;
       if (best.hp <= 0) this.killZombie(best, angle);
       else this.events.push({ type: 'hit', x: best.x, y: best.y, angle, kind: best.kind });
-    }
+    } else if (barrelHit) this.destroyBarrel(hx, hy);
     return { x: from.x + dx * bestT, y: from.y + dy * bestT };
   }
 
@@ -391,6 +551,7 @@ export class Game {
     this.zombies = this.zombies.filter((other) => other !== z);
     this.kills++;
     this.score += ZOMBIES[z.kind].score * this.level;
+    this.cash += CASH_PER_KILL[z.kind];
     this.events.push({ type: 'kill', x: z.x, y: z.y, angle, kind: z.kind });
     if (z.kind === 'exploder') this.explode(z.x, z.y);
     const dropChance = z.kind === 'brute' || z.kind === 'boss' ? 1 : 0.07;
@@ -402,16 +563,31 @@ export class Game {
   }
 
   /** Výbuch nafúknutej zombie: zraní hráča aj ostatné zombie v okolí (aj reťazovo). */
-  private explode(x: number, y: number): void {
+  private explode(x: number, y: number, source: 'zombie' | 'grenade' | 'barrel' = 'zombie'): void {
     this.events.push({ type: 'explode', x, y });
     const p = this.player;
+    const radius = source === 'zombie' ? EXPLOSION_RADIUS : 54;
+    // Vlastný granát hráča zraní menej.
+    const hurt = source === 'grenade' ? 18 : source === 'barrel' ? 35 : 40;
     const d = Math.hypot(p.x - x, p.y - y);
-    if (d < EXPLOSION_RADIUS && this.respawn <= 0)
-      this.damagePlayer(Math.round(40 * (1 - d / (EXPLOSION_RADIUS * 1.3))));
+    if (d < radius && this.respawn <= 0)
+      this.damagePlayer(Math.round(hurt * (1 - d / (radius * 1.3))));
+    // Sudy v dosahu vybuchnú tiež (reťaz).
+    const r = Math.ceil(radius / TILE);
+    const cx = Math.floor(x / TILE);
+    const cy = Math.floor(y / TILE);
+    for (let ty = cy - r; ty <= cy + r; ty++)
+      for (let tx = cx - r; tx <= cx + r; tx++)
+        if (
+          tileAt(this.map, tx, ty) === Tile.Barrel &&
+          Math.hypot((tx + 0.5) * TILE - x, (ty + 0.5) * TILE - y) < radius
+        )
+          this.destroyBarrel(tx, ty);
+    const zombieDamage = source === 'zombie' ? 5 : 9;
     for (const z of [...this.zombies]) {
       const dz = Math.hypot(z.x - x, z.y - y);
-      if (dz >= EXPLOSION_RADIUS || z.hp <= 0) continue;
-      z.hp -= z.kind === 'boss' ? 8 : 5;
+      if (dz >= radius || z.hp <= 0) continue;
+      z.hp -= (z.kind === 'boss' ? zombieDamage * 1.6 : zombieDamage) * damageFactor(this.upgrades);
       z.aware = true;
       z.vx += ((z.x - x) / (dz || 1)) * 120;
       z.vy += ((z.y - y) / (dz || 1)) * 120;
@@ -437,7 +613,7 @@ export class Game {
     const kind: Pickup['kind'] =
       missing && this.rng() < 0.35
         ? 'weapon'
-        : p.hp < MAX_HP * 0.6 && this.rng() < 0.4
+        : p.hp < this.maxHp * 0.6 && this.rng() < 0.4
           ? 'health'
           : 'ammo';
     this.pickups.push({
@@ -577,6 +753,7 @@ export class Game {
       stateTime: 0,
       dirX: 0,
       dirY: 0,
+      burn: 0,
     };
     if (kind === 'boss') z.hp = ZOMBIES.boss.hp + this.level * 12;
     z.maxHp = z.hp;
@@ -601,7 +778,7 @@ export class Game {
   private returnToCheckpoint(): void {
     const room = this.map.rooms[this.checkpoint]!;
     const p = this.player;
-    p.hp = MAX_HP;
+    p.hp = this.maxHp;
     p.hurt = 1;
     p.x = room.entry.x;
     p.y = room.entry.y;
@@ -619,6 +796,8 @@ export class Game {
     this.hordeQueue = [];
     this.hordeRoom = -1;
     this.spits = [];
+    this.grenades = [];
+    this.pendingBlasts = [];
     this.room = -1;
     this.flow.targetTile = -1;
     this.updateRoom();
@@ -632,6 +811,14 @@ export class Game {
     this.groanTimer -= dt;
     for (const z of [...this.zombies]) {
       if (z.hp <= 0) continue;
+      if (z.burn > 0) {
+        z.burn -= dt;
+        z.hp -= 1.4 * dt * damageFactor(this.upgrades);
+        if (z.hp <= 0) {
+          this.killZombie(z, z.angle);
+          continue;
+        }
+      }
       const def = ZOMBIES[z.kind];
       const toX = p.x - z.x;
       const toY = p.y - z.y;
@@ -798,8 +985,13 @@ export class Game {
       if (!item.permanent && item.age > 30) return false;
       if (Math.hypot(item.x - p.x, item.y - p.y) > 11) return true;
       if (item.kind === 'health') {
-        if (p.hp >= MAX_HP) return true; // plné zdravie: nechať na neskôr
-        p.hp = Math.min(MAX_HP, p.hp + 35);
+        if (p.hp >= this.maxHp) return true; // plné zdravie: nechať na neskôr
+        p.hp = Math.min(this.maxHp, p.hp + 35);
+      } else if (item.kind === 'cash') {
+        this.cash += item.value ?? 20;
+      } else if (item.kind === 'grenade') {
+        if (p.grenades >= MAX_GRENADES) return true;
+        p.grenades = Math.min(MAX_GRENADES, p.grenades + 2);
       } else if (item.kind === 'weapon' && item.weapon) {
         if (!p.owned.includes(item.weapon)) p.owned.push(item.weapon);
         p.ammo[item.weapon] += WEAPONS[item.weapon].ammoPack;
@@ -815,7 +1007,12 @@ export class Game {
   }
 
   get maxHp(): number {
-    return MAX_HP;
+    return maxHpFor(this.upgrades);
+  }
+
+  /** Dosah baterky (vylepšenie) — násobok pre renderer. */
+  get flashlightScale(): number {
+    return flashlightFactor(this.upgrades);
   }
 
   /** Boss v aktívnom úseku (pre ukazovateľ života), inak null. */

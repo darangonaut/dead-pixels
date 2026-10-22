@@ -1,4 +1,4 @@
-export type WeaponId = 'pistol' | 'shotgun' | 'smg';
+export type WeaponId = 'pistol' | 'shotgun' | 'smg' | 'flamer';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -51,6 +51,18 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
     ammoPack: 90,
     flash: 0.8,
   },
+  // Plameňomet: krátky kužeľ ohňa, zapáli zombie (palivo = náboje).
+  flamer: {
+    id: 'flamer',
+    rate: 20,
+    pellets: 0,
+    spread: 0.7,
+    damage: 0.3,
+    range: 64,
+    knockback: 0,
+    ammoPack: 120,
+    flash: 0.6,
+  },
 };
 
-export const WEAPON_ORDER: readonly WeaponId[] = ['pistol', 'shotgun', 'smg'];
+export const WEAPON_ORDER: readonly WeaponId[] = ['pistol', 'shotgun', 'smg', 'flamer'];

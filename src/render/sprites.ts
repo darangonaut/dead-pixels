@@ -128,7 +128,9 @@ export function drawGround(map: CityMap): PixelCanvas {
 
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
-      const t = at(x, y);
+      const raw = at(x, y);
+      // Pod sudom sa kreslí pôvodná podlaha (sud je samostatný sprite, dá sa zničiť).
+      const t = raw === Tile.Barrel ? (map.variant[y * map.width + x] as Tile) : raw;
       const x0 = x * TILE;
       const y0 = y * TILE;
       switch (t) {
@@ -420,7 +422,9 @@ export function drawPlayer(frame: number, weapon: WeaponId): PixelCanvas {
   // Hlava.
   pc.stamp(6, 5, ['hhh', 'hHh', 'hhh'], { h: 0x3a2a20, H: 0x4a3628 });
   // Zbraň a ruky.
-  const length = weapon === 'shotgun' ? 8 : weapon === 'smg' ? 6 : 4;
+  const length = weapon === 'shotgun' ? 8 : weapon === 'smg' ? 6 : weapon === 'flamer' ? 7 : 4;
+  // Plameňomet: nádrž na chrbte.
+  if (weapon === 'flamer') pc.fillRect(3, 6, 3, 4, 0xa83a2a);
   pc.fillRect(9, 7, length + 2, 2, 0x1a1c22);
   pc.set(9, 6, C.skin);
   pc.set(9, 9, C.skin);
@@ -587,9 +591,25 @@ export function drawCorpse(kind: ZombieKind): PixelCanvas {
 
 // --- Predmety ---
 
-export function drawPickup(kind: 'ammo' | 'health' | 'weapon', weapon?: WeaponId): PixelCanvas {
+export function drawPickup(
+  kind: 'ammo' | 'health' | 'weapon' | 'cash' | 'grenade',
+  weapon?: WeaponId,
+): PixelCanvas {
   const pc = new PixelCanvas(12, 12);
-  if (kind === 'health') {
+  if (kind === 'cash') {
+    // Zväzok bankoviek.
+    pc.fillRect(1, 3, 10, 6, 0x3e7a3a);
+    pc.fillRect(2, 2, 10, 6, 0x5aa04a);
+    pc.fillRect(5, 3, 3, 4, 0x9ad07a);
+    pc.fillRect(2, 4, 10, 1, 0xd8b04a);
+  } else if (kind === 'grenade') {
+    pc.stamp(3, 1, ['..ss..', '.kgggk', 'gggggg', 'gGgggg', 'gggggg', '.gggg.', '..gg..'], {
+      s: 0x8b93a1,
+      k: 0x2a2e22,
+      g: 0x4a5a2a,
+      G: 0x6e7e3a,
+    });
+  } else if (kind === 'health') {
     pc.fillRect(1, 2, 10, 8, C.white);
     pc.fillRect(5, 3, 2, 6, 0xd02030);
     pc.fillRect(3, 5, 6, 2, 0xd02030);
@@ -601,6 +621,7 @@ export function drawPickup(kind: 'ammo' | 'health' | 'weapon', weapon?: WeaponId
     pc.fillRect(0, 5, weapon === 'shotgun' ? 12 : 9, 2, 0x22252e);
     pc.fillRect(2, 7, 2, 3, 0x553923);
     if (weapon === 'smg') pc.fillRect(5, 7, 1, 3, 0x22252e);
+    if (weapon === 'flamer') pc.fillRect(1, 7, 4, 4, 0xa83a2a);
     pc.set(11, 4, C.yellow);
   }
   pc.outline(C.ink);
@@ -699,6 +720,41 @@ export function drawRotor(): PixelCanvas {
     pc.set(33, 32 + i, 0x2a2e22, 200);
   }
   pc.fillRect(30, 30, 6, 6, 0x1a1c16);
+  return pc;
+}
+
+/** Výbušný sud (červený s výstražným znakom). */
+export function drawBarrel(): PixelCanvas {
+  const pc = new PixelCanvas(14, 14);
+  for (let y = 0; y < 14; y++)
+    for (let x = 0; x < 14; x++) {
+      const d = Math.hypot(x - 6.5, y - 6.5);
+      if (d < 6) pc.set(x, y, d < 2 ? 0xffd34e : d < 4.5 ? 0xb82a24 : 0x7a1a18);
+    }
+  pc.fillRect(6, 3, 2, 3, 0x1a1a1a);
+  pc.set(6, 8, 0x1a1a1a);
+  pc.set(7, 8, 0x1a1a1a);
+  pc.outline(C.ink);
+  return pc;
+}
+
+/** Granát v letu (s blikajúcou poistkou). */
+export function drawGrenadeSprite(lit: boolean): PixelCanvas {
+  const pc = new PixelCanvas(6, 6);
+  pc.stamp(0, 0, ['.gg.', 'gGgg', 'gggg', '.gg.'], { g: 0x4a5a2a, G: 0x6e7e3a });
+  pc.set(3, 0, lit ? 0xff3030 : 0x8b93a1);
+  pc.outline(C.ink);
+  return pc;
+}
+
+/** Jazyk plameňa (častica). */
+export function drawFlame(variant: number): PixelCanvas {
+  const pc = new PixelCanvas(5, 5);
+  const colors = [0xffe070, 0xff9a30, 0xe8501e];
+  pc.stamp(0, 0, ['.oo.', 'oyyo', 'oyyo', '.oo.'], {
+    o: colors[(variant + 1) % 3]!,
+    y: colors[variant % 3]!,
+  });
   return pc;
 }
 

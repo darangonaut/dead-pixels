@@ -36,8 +36,10 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
 | Pohyb    | WASD / šípky            | ľavý palec (páčka)         |
 | Mierenie | myš                     | pravý palec (páčka)        |
 | Streľba  | ľavé tlačidlo / medzera | pravá páčka vychýlená viac |
-| Zbraň    | 1–3, koliesko, Q / E    | tlačidlo ⇄                 |
+| Zbraň    | 1–4, koliesko, Q / E    | tlačidlo ⇄                 |
+| Granát   | G / pravé tlačidlo      | tlačidlo 💣                |
 | Zvuk     | M                       | tlačidlo ♪                 |
+| Pauza    | Esc / P                 | tlačidlo ❚❚                |
 
 ## Hra
 
@@ -48,8 +50,13 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
   ktoré si ťa všimnú, keď ťa uvidia alebo začujú streľbu, a pokojné úseky so zásobami.
 - Kontrolné body: po smrti začneš na začiatku úseku. 3 životy, +1 za každú dokončenú úroveň.
   Šípka pri hráčovi ukazuje smer k ďalším dverám.
-- Zbrane: pištoľ (neobmedzené náboje), brokovnica, samopal. Náboje, lekárničky a nové zbrane
-  vypadávajú zo zombie.
+- Zbrane: pištoľ (neobmedzené náboje), brokovnica, samopal a plameňomet (zapáli zombie).
+  Granáty (G / pravé tlačidlo, na mobile 💣) a červené výbušné sudy — výbuch zraní hordu
+  a reťazovo odpáli ďalšie sudy.
+- Obchod po každej úrovni: za peniaze zo zombie a z úsekov kúpiš zbrane, náboje, granáty
+  a vylepšenia (sila zbraní, baterka, zdravie, rýchlosť).
+- Postup sa ukladá na začiatku každej úrovne — na úvodnej obrazovke **Pokračovať**.
+- Dynamická hudba: pokojný ambient, pri horde bicie, pri bossovi ešte rýchlejšie.
 - Štvrte: úrovne 1–3 centrum mesta, 4–6 nemocnica (oddelenia, hala, chodby, sanitky),
   7–9 metro (nástupištia, tunely, vestibul), 10 vojenská základňa. Na 10. úrovni čaká na
   heliporte vrtuľník — útek z mesta je koniec príbehu, potom sa dá pokračovať v nekonečnom režime.

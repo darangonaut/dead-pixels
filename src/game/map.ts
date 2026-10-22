@@ -29,6 +29,8 @@ export const enum Tile {
   Track,
   /** Pult, lavica, turniket — nedá sa prejsť, svetlo prejde. */
   Desk,
+  /** Výbušný sud (variant = pôvodná podlaha pod ním). */
+  Barrel,
 }
 
 /** Štvrť (prostredie) podľa úrovne. */
@@ -82,7 +84,7 @@ export interface Room {
   doorOut: number | null;
   /** Zombie, ktoré sa v úseku túlajú od začiatku. */
   roamers: { kind: SpawnKind; x: number; y: number }[];
-  loot: { kind: 'ammo' | 'health'; x: number; y: number }[];
+  loot: { kind: 'ammo' | 'health' | 'cash' | 'grenade'; x: number; y: number }[];
 }
 
 export interface Gate {
@@ -125,6 +127,7 @@ const SOLID = new Set<Tile>([
   Tile.Pillar,
   Tile.Bed,
   Tile.Desk,
+  Tile.Barrel,
 ]);
 const OPAQUE = new Set<Tile>([Tile.Building, Tile.Car, Tile.Crate, Tile.Pillar]);
 
@@ -633,6 +636,36 @@ export function generateLevel(seed: number, level = 1): CityMap {
     for (let i = 0; i < lootCount; i++) {
       const at = freeTile(room, 3);
       if (at) room.loot.push({ kind: rng() < 0.6 ? 'ammo' : 'health', ...at });
+    }
+    // Peniaze (obchod) a občas granáty.
+    const cashCount = room.encounter === 'calm' ? 2 : room.encounter === 'roam' ? 1 : 0;
+    for (let i = 0; i < cashCount; i++) {
+      const at = freeTile(room, 3);
+      if (at) room.loot.push({ kind: 'cash', ...at });
+    }
+    if (room.encounter !== 'start' && rng() < 0.3) {
+      const at = freeTile(room, 3);
+      if (at) room.loot.push({ kind: 'grenade', ...at });
+    }
+    // Výbušné sudy pri stenách a autách (viac v úsekoch s hordou).
+    if (room.encounter !== 'start' && room.encounter !== 'exit' && room.type !== 'park') {
+      const barrels =
+        (room.encounter === 'horde' || room.encounter === 'boss' ? 4 : 2) + randomInt(rng, 0, 2);
+      for (let i = 0, placedB = 0; i < 40 && placedB < barrels; i++) {
+        const x = randomInt(rng, room.x0, room.x1);
+        const y = randomInt(rng, room.y0, room.y1);
+        const t = get(x, y);
+        if (PROPS.has(t) || t === Tile.Lamp || t === Tile.Helipad || t === Tile.Track) continue;
+        const near = [get(x + 1, y), get(x - 1, y), get(x, y + 1), get(x, y - 1)];
+        // Len pri stene / aute / regáli, nie v priechode medzi dvoma prekážkami.
+        const blocked = near.filter((n) => PROPS.has(n) || n === Tile.Barrel).length;
+        if (blocked !== 1) continue;
+        const wx = (x + 0.5) * TILE;
+        const wy = (y + 0.5) * TILE;
+        if (Math.hypot(wx - room.entry.x, wy - room.entry.y) < 4 * TILE) continue;
+        set(x, y, Tile.Barrel, t);
+        placedB++;
+      }
     }
   }
 

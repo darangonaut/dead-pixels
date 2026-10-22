@@ -9,6 +9,13 @@ export class Sound {
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   muted = false;
+  // --- Hudba ---
+  private musicGain: GainNode | null = null;
+  private musicTimer: number | null = null;
+  private intensity = 0;
+  private nextIntensity = 0;
+  private step = 0;
+  private nextTime = 0;
 
   /** Prehliadač povolí zvuk až po interakcii hráča. */
   start(): void {
@@ -26,6 +33,122 @@ export class Sound {
     const data = this.noise.getChannelData(0);
     for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
     this.ambient();
+  }
+
+  /**
+   * Dynamická hudba: 0 = pokoj (basa a riedke tóny), 1 = horda (bicie, basové ostinato),
+   * 2 = boss (aj virbel a rýchle arpeggio). Zmena sa prejaví na začiatku taktu.
+   */
+  setIntensity(level: 0 | 1 | 2): void {
+    this.nextIntensity = level;
+  }
+
+  /** Zapne / vypne hudbu (počas hry áno, v menu nie). */
+  music(on: boolean): void {
+    if (!this.ctx) return;
+    if (on && this.musicTimer === null) {
+      this.musicGain ??= this.ctx.createGain();
+      this.musicGain.gain.value = 0.32;
+      this.musicGain.connect(this.master!);
+      this.step = 0;
+      this.nextTime = this.ctx.currentTime + 0.1;
+      this.musicTimer = window.setInterval(() => this.schedule(), 40);
+    } else if (!on && this.musicTimer !== null) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = null;
+    }
+  }
+
+  private schedule(): void {
+    const ctx = this.ctx!;
+    const bpm = [92, 126, 142][this.intensity]!;
+    const sixteenth = 60 / bpm / 4;
+    while (this.nextTime < ctx.currentTime + 0.15) {
+      const s = this.step % 16;
+      if (s === 0) this.intensity = this.nextIntensity;
+      this.playStep(s, this.nextTime, Math.floor(this.step / 16));
+      this.nextTime += sixteenth;
+      this.step++;
+    }
+  }
+
+  private note(
+    type: OscillatorType,
+    freq: number,
+    t: number,
+    duration: number,
+    gain: number,
+    filter = 0,
+  ): void {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    let out: AudioNode = osc;
+    if (filter) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = filter;
+      osc.connect(lp);
+      out = lp;
+    }
+    out.connect(g).connect(this.musicGain!);
+    osc.start(t);
+    osc.stop(t + duration + 0.05);
+  }
+
+  private drum(kind: 'kick' | 'hat' | 'snare', t: number): void {
+    const ctx = this.ctx!;
+    if (kind === 'kick') {
+      const osc = ctx.createOscillator();
+      osc.frequency.setValueAtTime(110, t);
+      osc.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.8, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      osc.connect(g).connect(this.musicGain!);
+      osc.start(t);
+      osc.stop(t + 0.25);
+      return;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = kind === 'hat' ? 'highpass' : 'bandpass';
+    f.frequency.value = kind === 'hat' ? 7000 : 1800;
+    const g = ctx.createGain();
+    const len = kind === 'hat' ? 0.04 : 0.15;
+    g.gain.setValueAtTime(kind === 'hat' ? 0.15 : 0.45, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + len);
+    src.connect(f).connect(g).connect(this.musicGain!);
+    src.start(t, Math.random() * 0.5, len + 0.02);
+  }
+
+  /** Jeden šestnástinový krok: A mol, temné tóny. */
+  private playStep(s: number, t: number, bar: number): void {
+    const A1 = 55;
+    const level = this.intensity;
+    if (level === 0) {
+      // Pokoj: dlhá basa na začiatku taktu, občas vzdialený tón.
+      if (s === 0) this.note('sawtooth', bar % 4 === 3 ? A1 * 1.189 : A1, t, 2.4, 0.18, 220);
+      if (s === 8 && bar % 2 === 1)
+        this.note('triangle', [440, 523, 659, 392][bar % 4]!, t, 1.2, 0.05);
+      return;
+    }
+    // Horda / boss: bicie a basové ostinato.
+    if (s % 4 === 0) this.drum('kick', t);
+    if (s % 2 === 0) this.drum('hat', t);
+    const bass = [A1, A1, A1 * 1.189, A1, A1, A1 * 1.335, A1 * 1.189, A1][s % 8]!;
+    if (s % 2 === 0) this.note('square', bass, t, 0.18, 0.16, 500);
+    if (level === 2) {
+      if (s === 4 || s === 12) this.drum('snare', t);
+      const arp = [440, 523, 659, 880, 659, 523][s % 6]!;
+      this.note('square', arp, t, 0.08, 0.04, 2500);
+    }
   }
 
   /** Pauza: zastaví všetky zvuky (aj ambient). */

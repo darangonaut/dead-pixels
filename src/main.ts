@@ -4,6 +4,8 @@ import './styles.css';
 import { Sound } from './audio/audio';
 import { Game, type Carry, type GameEvent } from './game/game';
 import { FINAL_LEVEL } from './game/map';
+import { parseSave, serializeSave, type SaveData } from './game/save';
+import { buy, shopItems, type ShopItem } from './game/shop';
 import { Controls } from './input/input';
 import { Renderer } from './render/renderer';
 import { getLanguage, setLanguage, t, type Language } from './ui/i18n';
@@ -23,6 +25,31 @@ const banner = $('#banner');
 const toast = $('#toast');
 const hurt = $('#hurt');
 const weaponBtn = $<HTMLButtonElement>('#weapon-btn');
+const grenadeBtn = $<HTMLButtonElement>('#grenade-btn');
+
+// --- Uložený postup (začiatok poslednej úrovne s výbavou) ---
+const SAVE_KEY = 'deadpixels.save';
+function readSave(): SaveData | null {
+  try {
+    return parseSave(localStorage.getItem(SAVE_KEY));
+  } catch {
+    return null;
+  }
+}
+function writeSave(save: SaveData): void {
+  try {
+    localStorage.setItem(SAVE_KEY, serializeSave(save));
+  } catch {
+    // úložisko nedostupné — hra pokračuje bez uloženia
+  }
+}
+function clearSave(): void {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {
+    // úložisko nedostupné
+  }
+}
 
 const BEST_KEY = 'deadpixels.best';
 const readBest = (): number => {
@@ -37,7 +64,14 @@ const sound = new Sound();
 let game: Game | null = null;
 let renderer: Renderer | null = null;
 const controls = new Controls(host, { move: $('#stick-move'), aim: $('#stick-aim') });
-controls.onTouchMode = () => (weaponBtn.hidden = !game);
+controls.onTouchMode = () => {
+  weaponBtn.hidden = !game;
+  grenadeBtn.hidden = !game;
+};
+grenadeBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  controls.requestGrenade();
+});
 weaponBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   controls.nextWeapon();
@@ -58,6 +92,10 @@ function renderTexts(): void {
   $('.again').textContent = t('again');
   $('.dead').textContent = t('dead');
   $('.next').textContent = t('nextLevel');
+  const save = readSave();
+  const cont = $<HTMLButtonElement>('.continue');
+  cont.hidden = !save;
+  if (save) cont.textContent = t('continueLevel', { n: save.level });
   $('.paused-title').textContent = t('paused');
   $('.victory-title').textContent = t('victoryTitle');
   $('.victory-story').textContent = t('victoryStory');
@@ -102,9 +140,13 @@ function showToast(text: string): void {
 
 let seed = 0;
 
-async function newGame(level = 1, carry?: Carry): Promise<void> {
+async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<void> {
   sound.start();
-  if (level === 1 || !seed) seed = Math.floor(Math.random() * 1e9);
+  if (resumeSeed !== undefined) seed = resumeSeed;
+  else if (level === 1 || !seed) seed = Math.floor(Math.random() * 1e9);
+  // Postup sa uloží na začiatku každej úrovne (od druhej).
+  if (carry) writeSave({ version: 1, seed, level, carry, savedAt: new Date().toISOString() });
+  else clearSave();
   renderer?.destroy();
   renderer = null;
   game = null;
@@ -125,6 +167,8 @@ async function newGame(level = 1, carry?: Carry): Promise<void> {
   victory.hidden = true;
   hud.hidden = false;
   weaponBtn.hidden = !controls.touchMode;
+  grenadeBtn.hidden = !controls.touchMode;
+  sound.music(true);
   const districtKey = {
     city: 'districtCity',
     hospital: 'districtHospital',
@@ -143,8 +187,59 @@ const debugLevel = new URLSearchParams(location.search).has('debug')
   : 1;
 $('.play').addEventListener('click', () => void newGame(debugLevel));
 $('.again').addEventListener('click', () => void newGame());
+$('.continue').addEventListener('click', () => {
+  const save = readSave();
+  if (save) void newGame(save.level, save.carry, save.seed);
+});
+
+// --- Obchod medzi úrovňami ---
+let shopCarry: Carry | null = null;
+let shopLevel = 1;
+
+function itemLabel(item: ShopItem): string {
+  const [kind, what] = item.id.split(':') as [string, string | undefined];
+  const params = { l: item.level ?? 0, max: item.max ?? 0, n: item.level ?? 0 };
+  if (kind === 'weapon') return t('itemWeapon', { weapon: t(what as 'shotgun') });
+  if (kind === 'ammo') return t('itemAmmo', { weapon: t(what as 'shotgun'), n: item.level ?? 0 });
+  if (kind === 'grenades') return t('itemGrenades', params);
+  const key = {
+    damage: 'itemDamage',
+    flashlight: 'itemFlashlight',
+    health: 'itemHealth',
+    speed: 'itemSpeed',
+  } as const;
+  return t(key[what as keyof typeof key], params);
+}
+
+function renderShop(): void {
+  if (!shopCarry) return;
+  const carry = shopCarry;
+  $('.done-cash').textContent = t('doneCash', { n: carry.cash });
+  const shop = $('.shop');
+  shop.innerHTML = '';
+  for (const item of shopItems(carry, shopLevel)) {
+    const button = document.createElement('button');
+    button.disabled = !item.available || carry.cash < item.cost;
+    button.dataset.item = item.id;
+    const name = document.createElement('span');
+    name.textContent = itemLabel(item);
+    const price = document.createElement('span');
+    price.className = 'price';
+    price.textContent = item.available ? `${item.cost} $` : '✓';
+    button.append(name, price);
+    button.addEventListener('click', () => {
+      const next = buy(carry, shopLevel, item.id);
+      if (!next) return;
+      shopCarry = next;
+      sound.play([{ type: 'pickup', kind: 'cash' }], { x: 0, y: 0 });
+      renderShop();
+    });
+    shop.appendChild(button);
+  }
+}
+
 $('.next').addEventListener('click', () => {
-  if (game) void newGame(game.level + 1, game.carry());
+  if (game && shopCarry) void newGame(game.level + 1, shopCarry);
 });
 const mute = $('.mute');
 function toggleSound(): void {
@@ -184,10 +279,11 @@ $('.pause-btn').addEventListener('click', () => setPaused(true));
 $('.resume').addEventListener('click', () => setPaused(false));
 $('.sound-toggle').addEventListener('click', toggleSound);
 $('.endless').addEventListener('click', () => {
-  if (game) void newGame(game.level + 1, game.carry());
+  if (game) void newGame(game.level + 1, shopCarry ?? game.carry());
 });
 $('.victory-menu').addEventListener('click', () => $<HTMLButtonElement>('.to-menu').click());
 $('.to-menu').addEventListener('click', () => {
+  sound.music(false);
   victory.hidden = true;
   bossBar.hidden = true;
   setPaused(false);
@@ -197,6 +293,7 @@ $('.to-menu').addEventListener('click', () => {
   host.innerHTML = '';
   hud.hidden = true;
   weaponBtn.hidden = true;
+  grenadeBtn.hidden = true;
   start.hidden = false;
   title.start();
   renderTexts();
@@ -233,6 +330,8 @@ let lastHud = '';
 const livesEl = $('.lives');
 
 const bossFill = $('.boss-fill');
+const grenadesEl = $('.grenades');
+const cashEl = $('.cash');
 
 function updateHud(g: Game): void {
   const boss = g.boss;
@@ -246,7 +345,7 @@ function updateHud(g: Game): void {
     horde !== null
       ? t('hordeLeft', { n: horde })
       : `${t('level', { n: g.level })} · ${t('section', { i: roomIndex + 1, n: g.map.rooms.length })}`;
-  const key = `${p.hp}|${p.weapon}|${ammoText}|${waveText}|${g.kills}|${g.score}|${g.lives}|${getLanguage()}`;
+  const key = `${p.hp}|${p.weapon}|${ammoText}|${waveText}|${g.kills}|${g.score}|${g.lives}|${g.cash}|${p.grenades}|${getLanguage()}`;
   if (key === lastHud) return;
   lastHud = key;
   hpFill.style.width = `${(p.hp / g.maxHp) * 100}%`;
@@ -255,6 +354,8 @@ function updateHud(g: Game): void {
   waveLabel.textContent = waveText;
   livesEl.textContent = '♥'.repeat(Math.max(0, g.lives));
   stats.textContent = `${t('kills')} ${g.kills} · ${t('score')} ${g.score}`;
+  grenadesEl.textContent = `💣 ${p.grenades}`;
+  cashEl.textContent = `${g.cash} $`;
 }
 
 function react(events: GameEvent[], g: Game): void {
@@ -266,18 +367,26 @@ function react(events: GameEvent[], g: Game): void {
     if (e.type === 'boss') showBanner(t('boss'), 2);
     if (e.type === 'explode') navigator.vibrate?.(80);
     if (e.type === 'levelComplete' && e.final) {
+      clearSave();
       setTimeout(() => {
         $('.victory-stats').textContent = t('victoryStats', { kills: g.kills, score: g.score });
         victory.hidden = false;
         weaponBtn.hidden = true;
+        grenadeBtn.hidden = true;
         bossBar.hidden = true;
+        // Nekonečný režim pokračuje s výbavou — obchod pred ním.
+        shopCarry = g.carry();
       }, 1200);
     } else if (e.type === 'levelComplete') {
       setTimeout(() => {
         $('.done-title').textContent = t('levelDone', { n: e.level });
         $('.done-summary').textContent = t('levelSummary', { kills: g.kills, score: g.score });
+        shopCarry = g.carry();
+        shopLevel = g.level + 1;
+        renderShop();
         done.hidden = false;
         weaponBtn.hidden = true;
+        grenadeBtn.hidden = true;
       }, 900);
     }
     if (e.type === 'hurt') {
@@ -291,9 +400,14 @@ function react(events: GameEvent[], g: Game): void {
           ? t('pickupHealth')
           : e.kind === 'weapon' && e.weapon
             ? t('pickupWeapon', { weapon: t(e.weapon) })
-            : t('pickupAmmo'),
+            : e.kind === 'cash'
+              ? t('pickupCash', { n: 20 + g.level * 5 })
+              : e.kind === 'grenade'
+                ? t('pickupGrenade')
+                : t('pickupAmmo'),
       );
     if (e.type === 'gameover') {
+      clearSave();
       const best = readBest();
       const record = g.score > best;
       if (record)
@@ -343,6 +457,7 @@ function frame(now: number): void {
       }
     }
     r.render(dt);
+    sound.setIntensity(game.boss ? 2 : game.hordeRemaining !== null ? 1 : 0);
     updateHud(game);
   }
   if (bannerTimer > 0 && (bannerTimer -= dt) <= 0) banner.classList.remove('show');

@@ -17,6 +17,7 @@ export class Controls {
   private mouse = { x: 0, y: 0, down: false, active: false };
   private wheel = 0;
   private select: number | null = null;
+  private grenade = false;
   private move: Stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
   private aim: Stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
   private lastAim = 0;
@@ -40,7 +41,8 @@ export class Controls {
     };
     on(window, 'keydown', (e) => {
       this.keys.add(e.key.toLowerCase());
-      if (e.key >= '1' && e.key <= '3') this.select = Number(e.key) - 1;
+      if (e.key >= '1' && e.key <= '4') this.select = Number(e.key) - 1;
+      if (e.key.toLowerCase() === 'g') this.grenade = true;
       if (e.key.toLowerCase() === 'q') this.wheel = -1;
       if (e.key.toLowerCase() === 'e') this.wheel = 1;
     });
@@ -52,7 +54,9 @@ export class Controls {
     on(surface, 'pointerdown', (e) => {
       if (e.pointerType === 'touch') return this.touchStart(e);
       this.mouse.active = true;
-      this.mouse.down = e.button === 0;
+      if (e.button === 0) this.mouse.down = true;
+      // Pravé tlačidlo: granát tam, kam mieri myš.
+      if (e.button === 2) this.grenade = true;
       this.mouse.x = e.clientX;
       this.mouse.y = e.clientY;
     });
@@ -139,6 +143,7 @@ export class Controls {
     let moveY = 0;
     let aim: number | null = null;
     let firing = false;
+    let throwDistance: number | null = null;
     if (this.touchMode) {
       const m = this.deflection(this.move);
       moveX = m.x;
@@ -162,6 +167,7 @@ export class Controls {
       const target = toWorld(this.mouse.x, this.mouse.y);
       aim = Math.atan2(target.y - player.y, target.x - player.x);
       firing = this.mouse.down || k.has(' ');
+      throwDistance = Math.hypot(target.x - player.x, target.y - player.y);
     }
     const input: Input = {
       moveX,
@@ -170,9 +176,12 @@ export class Controls {
       firing,
       switchWeapon: this.wheel !== 0 ? this.wheel : null,
       selectWeapon: this.select,
+      throwGrenade: this.grenade,
+      throwDistance,
     };
     this.wheel = 0;
     this.select = null;
+    this.grenade = false;
     return input;
   }
 
@@ -184,6 +193,11 @@ export class Controls {
       stick.id = null;
       this.drawStick(stick);
     }
+  }
+
+  /** Dotykové tlačidlo granátu. */
+  requestGrenade(): void {
+    this.grenade = true;
   }
 
   /** Dotykové tlačidlo zbrane. */

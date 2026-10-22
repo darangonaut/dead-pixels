@@ -8,6 +8,7 @@ import {
   Texture,
 } from 'pixi.js';
 import type { Game, GameEvent, ZombieKind } from '@/game/game';
+import { Tile } from '@/game/map';
 import { visibilityFan } from '@/game/geometry';
 import type { WeaponId } from '@/game/weapons';
 import type { PixelCanvas } from './PixelCanvas';
@@ -17,6 +18,9 @@ import {
   drawCorpse,
   drawDot,
   drawArrow,
+  drawBarrel,
+  drawFlame,
+  drawGrenadeSprite,
   drawGate,
   drawGround,
   drawPickup,
@@ -130,6 +134,10 @@ export class Renderer {
   private heli = new Container();
   private rotor: Sprite | null = null;
   private spitSprites: Sprite[] = [];
+  private grenadeSprites: Sprite[] = [];
+  private barrelSprites = new Map<number, Sprite>();
+  private flameTex: Texture[] = [];
+  private grenadeTex: Texture[] = [];
 
   constructor(private readonly game: Game) {}
 
@@ -158,6 +166,17 @@ export class Renderer {
     this.tex.spit = texture(drawSpit());
     this.tex.acid = texture(drawDot(0x7fd040));
     this.tex.scorch = texture(drawScorch());
+    this.flameTex = [0, 1, 2].map((v) => texture(drawFlame(v)));
+    this.grenadeTex = [false, true].map((lit) => texture(drawGrenadeSprite(lit)));
+    // Výbušné sudy ako samostatné sprity (dajú sa zničiť).
+    const barrelTex = texture(drawBarrel());
+    for (let i = 0; i < map.tiles.length; i++) {
+      if (map.tiles[i] !== Tile.Barrel) continue;
+      const sprite = new Sprite(barrelTex);
+      sprite.anchor.set(0.5);
+      sprite.position.set((i % map.width) * 16 + 8, Math.floor(i / map.width) * 16 + 8);
+      this.barrelSprites.set(i, sprite);
+    }
     const light = Texture.from(lightCanvas(128));
     light.source.scaleMode = 'linear';
     this.tex.light = light;
@@ -230,6 +249,7 @@ export class Renderer {
       ground,
       new Sprite(this.decals),
       props,
+      ...this.barrelSprites.values(),
       ...this.gateSprites,
       this.pickupsLayer,
       this.heli,
@@ -351,6 +371,33 @@ export class Renderer {
               6,
             );
           break;
+        case 'barrel':
+          this.barrelSprites.get(e.tile)?.destroy();
+          this.barrelSprites.delete(e.tile);
+          break;
+        case 'flame':
+          for (let i = 0; i < 3; i++) {
+            const a = e.angle + (Math.random() - 0.5) * 0.6;
+            const sp = 150 + Math.random() * 90;
+            this.particle(
+              this.flameTex[i % 3]!,
+              e.x,
+              e.y,
+              Math.cos(a) * sp,
+              Math.sin(a) * sp,
+              0.32,
+              false,
+              2,
+            );
+          }
+          this.flashes.push({
+            x: e.x + Math.cos(e.angle) * 24,
+            y: e.y + Math.sin(e.angle) * 24,
+            size: 90,
+            age: 0,
+            life: 0.08,
+          });
+          break;
         case 'bossStun':
           this.shake = Math.max(this.shake, 4);
           break;
@@ -466,6 +513,35 @@ export class Renderer {
     }
     this.beacon.alpha = 0.25 + 0.2 * Math.sin(game.time * 4);
     if (this.rotor) this.rotor.rotation += dt * 18;
+    // Granáty (blikajúca poistka).
+    while (this.grenadeSprites.length < game.grenades.length) {
+      const sprite = new Sprite(this.grenadeTex[0]);
+      sprite.anchor.set(0.5);
+      this.effects.addChild(sprite);
+      this.grenadeSprites.push(sprite);
+    }
+    this.grenadeSprites.forEach((sprite, i) => {
+      const g = game.grenades[i];
+      sprite.visible = !!g;
+      if (!g) return;
+      sprite.position.set(Math.round(g.x), Math.round(g.y));
+      sprite.texture = this.grenadeTex[Math.floor(g.fuse * 10) % 2]!;
+    });
+    // Horiace zombie: plamene a svetlo.
+    for (const z of game.zombies) {
+      if (z.burn <= 0 || Math.random() > dt * 14) continue;
+      this.particle(
+        this.flameTex[Math.floor(Math.random() * 3)]!,
+        z.x + (Math.random() - 0.5) * 8,
+        z.y + (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 10,
+        -20,
+        0.4,
+        false,
+        2,
+      );
+      this.flashes.push({ x: z.x, y: z.y, size: 50, age: 0, life: 0.12 });
+    }
     // Pľuvance kyseliny.
     while (this.spitSprites.length < game.spits.length) {
       const sprite = new Sprite(this.tex.spit);
@@ -629,9 +705,9 @@ export class Renderer {
       );
     // Baterka: tri vrstvy kužeľa (mäkký okraj ďaleko), okolo hráča malý kruh.
     for (const [range, alpha] of [
-      [FLASHLIGHT_RANGE, 0.45],
-      [FLASHLIGHT_RANGE * 0.7, 0.35],
-      [FLASHLIGHT_RANGE * 0.42, 0.25],
+      [FLASHLIGHT_RANGE * game.flashlightScale, 0.45],
+      [FLASHLIGHT_RANGE * game.flashlightScale * 0.7, 0.35],
+      [FLASHLIGHT_RANGE * game.flashlightScale * 0.42, 0.25],
     ] as const) {
       poly(visibilityFan(game.map, p.x, p.y, range, p.angle, FLASHLIGHT_SPREAD, 72), alpha);
     }

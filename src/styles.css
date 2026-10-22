@@ -1,0 +1,285 @@
+:root {
+  --ink: #0d0b14;
+  --text: #e8dcc0;
+  --muted: #8a8696;
+  --red: #c42a36;
+  --pixel: 'Pixelify Sans', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--ink);
+  font-family: var(--pixel);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+}
+
+#game canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+button {
+  font-family: var(--pixel);
+  color: var(--text);
+  cursor: pointer;
+  background: #1c1a26;
+  border: 0;
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 0 0 4px #3a3646;
+}
+
+button.big {
+  padding: 12px 36px;
+  font-size: 26px;
+  color: var(--ink);
+  text-transform: uppercase;
+  background: var(--red);
+  box-shadow:
+    0 0 0 3px var(--ink),
+    inset -4px -4px 0 #7a1020,
+    inset 4px 4px 0 #e85a5a;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud-left {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hp {
+  width: 160px;
+  height: 14px;
+  background: #2a1016;
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 0 0 4px #3a3646;
+}
+
+.hp-fill {
+  height: 100%;
+  background: var(--red);
+  box-shadow: inset 0 3px 0 #e85a5a;
+  transition: width 0.15s;
+}
+
+.weapon {
+  font-size: 16px;
+  text-shadow: 2px 2px 0 var(--ink);
+}
+
+.ammo {
+  color: #ffd34e;
+}
+
+.hud-right {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(56px, calc(env(safe-area-inset-right) + 44px));
+  text-align: right;
+  text-shadow: 2px 2px 0 var(--ink);
+}
+
+.wave-label {
+  font-size: 20px;
+  color: #ffd34e;
+}
+
+.stats {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.mute {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  width: 32px;
+  height: 32px;
+  pointer-events: auto;
+}
+
+.mute.off {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+#banner {
+  position: fixed;
+  top: 14%;
+  left: 0;
+  right: 0;
+  font-size: 44px;
+  color: var(--red);
+  text-align: center;
+  text-shadow:
+    3px 3px 0 var(--ink),
+    0 0 18px rgb(196 42 54 / 50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+#banner.show {
+  opacity: 1;
+}
+
+#toast {
+  position: fixed;
+  bottom: 22%;
+  left: 0;
+  right: 0;
+  font-size: 18px;
+  color: #ffd34e;
+  text-align: center;
+  text-shadow: 2px 2px 0 var(--ink);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+#toast.show {
+  opacity: 1;
+}
+
+#hurt {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle, transparent 45%, rgb(160 0 20 / 70%));
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  background: radial-gradient(circle at 50% 40%, rgb(13 11 20 / 55%), rgb(13 11 20 / 92%) 70%);
+}
+
+.screen[hidden],
+#hud[hidden] {
+  display: none;
+}
+
+.logo {
+  width: min(88vw, 620px);
+  image-rendering: pixelated;
+}
+
+.tagline {
+  margin: 0;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.langs {
+  display: flex;
+  gap: 10px;
+}
+
+.langs button {
+  padding: 6px 14px;
+}
+
+.langs button.active {
+  color: var(--ink);
+  background: var(--text);
+}
+
+.controls,
+.best {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.dead {
+  margin: 0;
+  font-size: 54px;
+  color: var(--red);
+  text-shadow: 4px 4px 0 var(--ink);
+}
+
+.summary {
+  margin: 0;
+  font-size: 20px;
+}
+
+.record {
+  margin: 0;
+  color: #ffd34e;
+}
+
+.stick {
+  position: fixed;
+  display: none;
+  width: 104px;
+  height: 104px;
+  margin: -52px 0 0 -52px;
+  pointer-events: none;
+  border: 3px solid rgb(232 220 192 / 35%);
+  border-radius: 50%;
+}
+
+.stick .knob {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  width: 34px;
+  height: 34px;
+  background: rgb(232 220 192 / 45%);
+  border-radius: 50%;
+}
+
+#stick-aim {
+  border-color: rgb(196 42 54 / 55%);
+}
+
+#stick-aim .knob {
+  background: rgb(196 42 54 / 60%);
+}
+
+#weapon-btn {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  font-size: 24px;
+}
+
+#weapon-btn[hidden] {
+  display: none;
+}

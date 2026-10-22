@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="sk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0d0b14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Dead Pixels</title>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="hurt"></div>
+    <div id="hud" hidden>
+      <div class="hud-left">
+        <div class="hp"><div class="hp-fill"></div></div>
+        <div class="weapon"><span class="weapon-name"></span> <span class="ammo"></span></div>
+      </div>
+      <div class="hud-right">
+        <div class="wave-label"></div>
+        <div class="stats"></div>
+      </div>
+      <button class="mute" aria-label="Zvuk">♪</button>
+    </div>
+    <div id="banner"></div>
+    <div id="toast"></div>
+    <div class="stick" id="stick-move"><div class="knob"></div></div>
+    <div class="stick" id="stick-aim"><div class="knob"></div></div>
+    <button id="weapon-btn" hidden>⇄</button>
+    <section id="start" class="screen">
+      <img class="logo" alt="Dead Pixels" />
+      <p class="tagline"></p>
+      <div class="langs">
+        <button data-lang="sk">SK</button>
+        <button data-lang="en">EN</button>
+      </div>
+      <button class="play big"></button>
+      <p class="controls"></p>
+      <p class="best"></p>
+    </section>
+    <section id="over" class="screen" hidden>
+      <h1 class="dead"></h1>
+      <p class="summary"></p>
+      <p class="record"></p>
+      <button class="again big"></button>
+    </section>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="sk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0d0b14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Dead Pixels</title>
+    <script type="module" crossorigin src="./assets/index-DRUmTcV8.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/CanvasPool-BTOKPhVB.js">
+    <link rel="modulepreload" crossorigin href="./assets/canvasUtils-DQ7kH_ro.js">
+    <link rel="modulepreload" crossorigin href="./assets/RenderTargetSystem-D2kboo37.js">
+    <link rel="modulepreload" crossorigin href="./assets/getTextureBatchBindGroup-Bovnqqoa.js">
+    <link rel="modulepreload" crossorigin href="./assets/getTexelRangeRects-B7GOSJ1z.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-Drbnes0w.css">
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="hurt"></div>
+    <div id="hud" hidden>
+      <div class="hud-left">
+        <div class="hp"><div class="hp-fill"></div></div>
+        <div class="weapon">
+          <span class="weapon-name"></span> <span class="ammo"></span>
+          <span class="grenades"></span>
+        </div>
+        <div class="cash"></div>
+      </div>
+      <div class="hud-right">
+        <div class="wave-label"></div>
+        <div class="lives"></div>
+        <div class="stats"></div>
+      </div>
+      <button class="pause-btn" aria-label="Pauza">❚❚</button>
+      <button class="mute" aria-label="Zvuk">♪</button>
+    </div>
+    <div id="boss-bar" hidden>
+      <span class="boss-name"></span>
+      <div class="boss-hp"><div class="boss-fill"></div></div>
+    </div>
+    <div id="banner"></div>
+    <div id="toast"></div>
+    <div class="stick" id="stick-move"><div class="knob"></div></div>
+    <div class="stick" id="stick-aim"><div class="knob"></div></div>
+    <button id="weapon-btn" hidden>⇄</button>
+    <button id="grenade-btn" hidden>💣</button>
+    <section id="start" class="screen">
+      <img class="logo" alt="Dead Pixels" />
+      <p class="tagline"></p>
+      <div class="langs">
+        <button data-lang="sk">SK</button>
+        <button data-lang="en">EN</button>
+      </div>
+      <button class="continue big" hidden></button>
+      <button class="play big"></button>
+      <p class="controls"></p>
+      <p class="best"></p>
+    </section>
+    <section id="paused" class="screen" hidden>
+      <h1 class="paused-title"></h1>
+      <button class="resume big"></button>
+      <button class="sound-toggle"></button>
+      <button class="to-menu"></button>
+      <p class="paused-hint"></p>
+    </section>
+    <section id="victory" class="screen" hidden>
+      <h1 class="victory-title"></h1>
+      <p class="victory-story"></p>
+      <p class="victory-stats"></p>
+      <button class="endless big"></button>
+      <button class="victory-menu"></button>
+    </section>
+    <section id="done" class="screen" hidden>
+      <h1 class="done-title"></h1>
+      <p class="done-summary"></p>
+      <p class="done-cash"></p>
+      <div class="shop"></div>
+      <button class="next big"></button>
+    </section>
+    <section id="over" class="screen" hidden>
+      <h1 class="dead"></h1>
+      <p class="summary"></p>
+      <p class="record"></p>
+      <button class="again big"></button>
+    </section>
+  </body>
+</html>

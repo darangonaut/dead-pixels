@@ -1,6 +1,7 @@
 import {
   Application,
   BlurFilter,
+  CanvasSource,
   Container,
   Graphics,
   RenderTexture,
@@ -11,9 +12,10 @@ import type { Game, GameEvent, ZombieKind } from '@/game/game';
 import { Tile } from '@/game/map';
 import { visibilityFan } from '@/game/geometry';
 import type { WeaponId } from '@/game/weapons';
-import type { PixelCanvas } from './PixelCanvas';
+import { PixelCanvas } from './PixelCanvas';
 import {
   C,
+  PX,
   drawBlood,
   drawCorpse,
   drawDot,
@@ -35,10 +37,30 @@ import {
   lightCanvas,
 } from './sprites';
 
+/** Textúra z pixel artu: kresba má PX pixelov na pixel sveta, takže sa zmenší na veľkosť sveta. */
 function texture(pc: PixelCanvas): Texture {
-  const t = Texture.from(pc.toCanvas());
-  t.source.scaleMode = 'nearest';
-  return t;
+  return new Texture({
+    source: new CanvasSource({ resource: pc.toCanvas(), resolution: PX, scaleMode: 'nearest' }),
+  });
+}
+
+/** Veľký obrázok (celé mesto) rozrezaný na dlaždice, aby neprekročil limit textúry GPU. */
+function tiledSprite(pc: PixelCanvas, size = 2048): Container {
+  const root = new Container();
+  for (let y0 = 0; y0 < pc.height; y0 += size)
+    for (let x0 = 0; x0 < pc.width; x0 += size) {
+      const w = Math.min(size, pc.width - x0);
+      const h = Math.min(size, pc.height - y0);
+      const part = new PixelCanvas(w, h);
+      for (let y = 0; y < h; y++) {
+        const from = ((y0 + y) * pc.width + x0) * 4;
+        part.data.set(pc.data.subarray(from, from + w * 4), y * w * 4);
+      }
+      const sprite = new Sprite(texture(part));
+      sprite.position.set(x0 / PX, y0 / PX);
+      root.addChild(sprite);
+    }
+  return root;
 }
 
 interface Particle {
@@ -92,7 +114,7 @@ export class Renderer {
   private flashRoot = new Container();
   private dark!: RenderTexture;
   private darkSprite!: Sprite;
-  private roofs!: Sprite;
+  private roofs!: Container;
   private zoom = 3;
   private viewW = 0;
   private viewH = 0;
@@ -158,7 +180,7 @@ export class Renderer {
       this.tex.corpse.set(kind, texture(drawCorpse(kind)));
       for (const f of [0, 1]) this.tex.zombie.set(`${kind}${f}`, texture(drawZombie(kind, f)));
     }
-    for (const w of ['pistol', 'shotgun', 'smg'] as const)
+    for (const w of ['pistol', 'shotgun', 'smg', 'flamer'] as const)
       for (const f of [0, 1]) this.tex.player.set(`${w}${f}`, texture(drawPlayer(f, w)));
     this.tex.drop = texture(drawDot(C.blood));
     this.tex.spark = texture(drawDot(C.yellow, 1, 1));
@@ -181,12 +203,21 @@ export class Renderer {
     light.source.scaleMode = 'linear';
     this.tex.light = light;
 
-    const ground = new Sprite(texture(drawGround(map)));
-    const props = new Sprite(texture(drawProps(map)));
+    const ground = tiledSprite(drawGround(map));
+    const props = tiledSprite(drawProps(map));
     // Strechy nad tmou, stlmené ako v mesačnom svetle — mesto je čitateľné aj v tme.
-    this.roofs = new Sprite(texture(drawRoofs(map)));
-    this.roofs.tint = 0x4a4a5e;
-    this.decals = RenderTexture.create({ width: ground.width, height: ground.height });
+    this.roofs = tiledSprite(drawRoofs(map));
+    for (const part of this.roofs.children) (part as Sprite).tint = 0x4a4a5e;
+    // Stopy (krv, spáleniny) v jemnom rozlíšení, ak to GPU zvládne.
+    const worldW = map.width * 16;
+    const worldH = map.height * 16;
+    const gl = (this.app.renderer as { gl?: WebGLRenderingContext }).gl;
+    const maxTex: number = gl?.getParameter(gl.MAX_TEXTURE_SIZE) ?? 4096;
+    this.decals = RenderTexture.create({
+      width: worldW,
+      height: worldH,
+      resolution: Math.max(worldW, worldH) * PX <= maxTex ? PX : 1,
+    });
     this.decals.source.scaleMode = 'nearest';
     this.stamp.addChild(this.stampSprite);
     this.stampSprite.anchor.set(0.5);
@@ -268,10 +299,14 @@ export class Renderer {
   private resize(): void {
     const w = this.app.screen.width;
     const h = this.app.screen.height;
-    // Celočíselné zväčšenie: kratšia strana ukáže ~220 px sveta (ostré pixely).
-    // Na dotykovom displeji (mobil) väčšie priblíženie — postavy musia byť dobre vidieť.
+    // Kratšia strana ukáže ~180 px sveta; na dotykovom displeji (mobil) väčšie priblíženie,
+    // postavy musia byť dobre vidieť. Pixel kresby (1/PX pixela sveta) má na obrazovke
+    // celý počet fyzických pixelov, aby boli pixely ostré a rovnako veľké.
     const coarse = window.matchMedia('(pointer: coarse)').matches;
-    this.zoom = Math.max(2, Math.min(6, Math.round(Math.min(w, h) / (coarse ? 130 : 180))));
+    const dpr = this.app.renderer.resolution;
+    const target = Math.min(w, h) / (coarse ? 130 : 180);
+    const art = Math.max(1, Math.min(Math.floor((6 * dpr) / PX), Math.round((target * dpr) / PX)));
+    this.zoom = (art * PX) / dpr;
     this.world.scale.set(this.zoom);
     this.viewW = Math.ceil(w / this.zoom) + 2;
     this.viewH = Math.ceil(h / this.zoom) + 2;
@@ -486,9 +521,11 @@ export class Renderer {
     const sy = (Math.random() - 0.5) * this.shake;
     const w = this.app.screen.width;
     const h = this.app.screen.height;
+    // Zarovnanie na fyzické pixely (ostré pixely aj pri neceločíselnom devicePixelRatio).
+    const dpr = this.app.renderer.resolution;
     this.world.position.set(
-      Math.round(w / 2 - (this.cam.x + sx) * this.zoom),
-      Math.round(h / 2 - (this.cam.y + sy) * this.zoom),
+      Math.round((w / 2 - (this.cam.x + sx) * this.zoom) * dpr) / dpr,
+      Math.round((h / 2 - (this.cam.y + sy) * this.zoom) * dpr) / dpr,
     );
 
     // Brány sa plynulo objavia / zmiznú.

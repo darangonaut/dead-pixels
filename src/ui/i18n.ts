@@ -61,6 +61,7 @@ const sk = {
   pickupAmmo: '+ Náboje',
   pickupWeapon: '+ {weapon}',
   rotate: 'Otoč telefón na šírku — hrá sa lepšie.',
+  grabbed: 'Chytil ťa zozadu!',
 };
 
 type Key = keyof typeof sk;
@@ -126,6 +127,7 @@ const en: Record<Key, string> = {
   pickupAmmo: '+ Ammo',
   pickupWeapon: '+ {weapon}',
   rotate: 'Turn your phone sideways — it plays better.',
+  grabbed: 'Grabbed from behind!',
 };
 
 const KEY = 'deadpixels.language';

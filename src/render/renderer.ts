@@ -436,6 +436,12 @@ export class Renderer {
         case 'bossStun':
           this.shake = Math.max(this.shake, 4);
           break;
+        case 'lurkerRise':
+          this.shake = Math.max(this.shake, 2);
+          break;
+        case 'grab':
+          this.shake = Math.max(this.shake, 4);
+          break;
         case 'kill':
           this.splatter(e.x, e.y, e.angle, 10, true);
           this.stampDecal(
@@ -619,6 +625,22 @@ export class Renderer {
       sprite.texture = this.tex.zombie.get(`${z.kind}${Math.floor(z.step) % 2}`)!;
       sprite.position.set(Math.round(z.x), Math.round(z.y));
       sprite.rotation = z.angle + (z.stagger > 0 ? 0.3 : 0);
+      sprite.scale.set(1);
+      if (z.state === 'lying') {
+        // Falošný mŕtvy vyzerá ako mŕtvola; pri šklbnutí sa trhne.
+        sprite.texture = this.tex.corpse.get(z.kind)!;
+        sprite.rotation = z.angle + (z.twitch > 0 ? Math.sin(game.time * 70) * 0.12 : 0);
+        sprite.tint = 0xffffff;
+        continue;
+      }
+      if (z.state === 'rising') {
+        // Vstáva: strieda sa mŕtvola a živá postava, telo sa dvíha.
+        const k = Math.floor(game.time * 18) % 2;
+        sprite.texture = k ? this.tex.zombie.get(`${z.kind}0`)! : this.tex.corpse.get(z.kind)!;
+        sprite.scale.set(1 + Math.sin(game.time * 30) * 0.06);
+        sprite.tint = 0xffb0b0;
+        continue;
+      }
       sprite.tint =
         z.state === 'windup'
           ? 0xff7070

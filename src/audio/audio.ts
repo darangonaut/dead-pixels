@@ -307,6 +307,23 @@ export class Sound {
         case 'bossStun':
           this.burst(0.4, 400, 0.7, 1);
           break;
+        case 'twitch': {
+          // Tiché mľasknutie / lupnutie kĺbu — počuť len zblízka.
+          const d = Math.hypot(e.x - listener.x, e.y - listener.y);
+          const vol = Math.max(0, 1 - d / 150) * 0.14;
+          if (vol > 0.01) this.burst(0.05, 700, vol, 5);
+          break;
+        }
+        case 'lurkerRise':
+          // Chrčivý výkrik zozadu.
+          this.tone('sawtooth', 320, 110, 0.55, 0.32);
+          this.tone('square', 250, 90, 0.5, 0.12);
+          this.burst(0.3, 1400, 0.3, 2);
+          break;
+        case 'grab':
+          this.tone('square', 150, 60, 0.3, 0.2);
+          this.burst(0.15, 600, 0.35, 2);
+          break;
         case 'died':
           this.tone('sawtooth', 220, 50, 1.2, 0.25);
           break;

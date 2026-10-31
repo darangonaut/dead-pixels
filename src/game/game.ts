@@ -50,13 +50,30 @@ export interface Zombie {
   maxHp: number;
   /** Odpočet schopnosti (pľuvanec, útok bossa) (s). */
   timer: number;
-  /** Boss: príprava, rozbeh alebo omráčenie po náraze do steny. */
-  state: 'normal' | 'windup' | 'charge' | 'stunned';
+  /**
+   * Boss: príprava, rozbeh alebo omráčenie po náraze do steny. Falošný mŕtvy: leží
+   * (`lying`) a vstáva (`rising`).
+   */
+  state: 'normal' | 'windup' | 'charge' | 'stunned' | 'lying' | 'rising';
   stateTime: number;
   dirX: number;
   dirY: number;
   /** Horí (s) — po zásahu plameňometom. */
   burn: number;
+  /** Falošný mŕtvy: práve sa šklbol (s, pre animáciu). */
+  twitch: number;
+  /** Index vo `Game.lurkers`, ak je to falošný mŕtvy. */
+  lurker?: number;
+}
+
+/** Falošný mŕtvy: leží pri ceste ako mŕtvola a vstane, keď okolo neho hráč prejde. */
+export interface Lurker {
+  room: number;
+  x: number;
+  y: number;
+  kind: ZombieKind;
+  /** Už vstal alebo bol zabitý — po návrate na kontrolný bod sa neobjaví znova. */
+  done: boolean;
 }
 
 /** Hodený granát: kĺže po zemi, odráža sa od stien a po zapálenej rozbuške vybuchne. */
@@ -103,6 +120,8 @@ export interface Player {
   hurt: number;
   step: number;
   grenades: number;
+  /** Schmatla ho zombie zozadu (s) — pohyb je pomalší. */
+  grabbed: number;
 }
 
 /** Čo si hráč nesie do ďalšej úrovne. */
@@ -166,6 +185,9 @@ export type GameEvent =
   | { type: 'flame'; x: number; y: number; angle: number }
   | { type: 'throw'; x: number; y: number }
   | { type: 'barrel'; tile: number }
+  | { type: 'twitch'; x: number; y: number }
+  | { type: 'lurkerRise'; x: number; y: number }
+  | { type: 'grab'; x: number; y: number }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
@@ -186,6 +208,10 @@ export const ZOMBIES: Readonly<
 };
 
 const EXPLOSION_RADIUS = 44;
+/** Falošný mŕtvy vstane, keď je hráč bližšie (px) a otočený chrbtom, alebo úplne pri ňom. */
+const LURKER_REACH = 30;
+const LURKER_CLOSE = 16;
+const LURKER_RISE = 0.5;
 const SPIT_SPEED = 110;
 
 /** Zloženie hordy v úseku podľa úrovne. */
@@ -246,6 +272,9 @@ export class Game {
   private readonly nearby: Zombie[] = [];
   private flowTimer = 0;
   private groanTimer = 2;
+  /** Náhoda pre prekvapenia (oddelená, aby nemenila mapu ani priebeh boja). */
+  private readonly surprise: () => number;
+  readonly lurkers: Lurker[] = [];
 
   constructor(seed: number, level = 1, carry?: Carry) {
     this.level = level;
@@ -271,6 +300,7 @@ export class Game {
       hurt: 0,
       step: 0,
       grenades: carry?.grenades ?? 2,
+      grabbed: 0,
     };
     // Zásoby položené v úsekoch.
     for (const room of this.map.rooms)
@@ -285,6 +315,54 @@ export class Game {
           permanent: true,
         });
     this.flow.update(this.player.x, this.player.y);
+    this.surprise = createRng(seed ^ 0x5eed ^ Math.imul(level, 7919));
+    this.planLurkers();
+  }
+
+  /** Úseky bez udalosti (pokoj, túlavé zombie) — miesto pre prekvapenia. */
+  private quietRooms(): Room[] {
+    return this.map.rooms.filter((r) => r.encounter === 'calm' || r.encounter === 'roam');
+  }
+
+  /** Voľné políčko najbližšie k bodu (svet) vo vnútri úseku, ďalej od vstupu. */
+  private freeSpotNear(room: Room, x: number, y: number, minFromEntry: number): Vec | null {
+    let best: Vec | null = null;
+    let bestD = Infinity;
+    for (let ty = room.y0 + 1; ty <= room.y1 - 1; ty++)
+      for (let tx = room.x0 + 1; tx <= room.x1 - 1; tx++) {
+        if (isSolid(this.map, tx, ty)) continue;
+        const at = { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
+        if (Math.hypot(at.x - room.entry.x, at.y - room.entry.y) < minFromEntry) continue;
+        const d = Math.hypot(at.x - x, at.y - y);
+        if (d < bestD) {
+          bestD = d;
+          best = at;
+        }
+      }
+    return best;
+  }
+
+  /** Falošní mŕtvi: 1 (od 4. úrovne 2) v tichých úsekoch, kúsok vedľa cesty k bráne von. */
+  private planLurkers(): void {
+    const rooms = this.quietRooms().sort(() => this.surprise() - 0.5);
+    const count = Math.min(rooms.length, this.level >= 4 ? 2 : 1);
+    for (const room of rooms.slice(0, count)) {
+      const out = room.doorOut !== null ? this.map.gates[room.doorOut]! : this.map.exit;
+      const t = 0.45 + this.surprise() * 0.2;
+      const side = (this.surprise() < 0.5 ? -1 : 1) * TILE * 1.2;
+      const dx = out.x - room.entry.x;
+      const dy = out.y - room.entry.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const at = this.freeSpotNear(
+        room,
+        room.entry.x + dx * t + (-dy / len) * side,
+        room.entry.y + dy * t + (dx / len) * side,
+        TILE * 4,
+      );
+      if (!at) continue;
+      const kind: ZombieKind = this.level >= 3 && this.surprise() < 0.4 ? 'runner' : 'walker';
+      this.lurkers.push({ room: room.index, x: at.x, y: at.y, kind, done: false });
+    }
   }
 
   /** Stav na prenesenie do ďalšej úrovne (+1 život za dokončenie). */
@@ -361,7 +439,8 @@ export class Game {
       my /= len;
     }
     if (len > 0.05) p.step += dt * 10 * Math.min(1, len);
-    const speed = PLAYER_SPEED * speedFactor(this.upgrades);
+    p.grabbed = Math.max(0, p.grabbed - dt);
+    const speed = PLAYER_SPEED * speedFactor(this.upgrades) * (p.grabbed > 0 ? 0.35 : 1);
     moveCircle(this.map, p, PLAYER_RADIUS, mx * speed * dt, my * speed * dt);
     if (input.aim !== null) p.angle = input.aim;
     p.hurt = Math.max(0, p.hurt - dt);
@@ -549,6 +628,7 @@ export class Game {
 
   private killZombie(z: Zombie, angle: number): void {
     this.zombies = this.zombies.filter((other) => other !== z);
+    if (z.lurker !== undefined) this.lurkers[z.lurker]!.done = true;
     this.kills++;
     this.score += ZOMBIES[z.kind].score * this.level;
     this.cash += CASH_PER_KILL[z.kind];
@@ -652,6 +732,14 @@ export class Game {
       const z = this.spawnZombie(r.kind, r.x, r.y, room.index);
       z.aware = false;
     }
+    this.lurkers.forEach((l, i) => {
+      if (l.room !== room.index || l.done) return;
+      const z = this.spawnZombie(l.kind, l.x, l.y, room.index);
+      z.aware = false;
+      z.state = 'lying';
+      z.lurker = i;
+      z.timer = 1.5 + this.surprise() * 2;
+    });
     if (
       (room.encounter === 'horde' || room.encounter === 'boss') &&
       !this.cleared.has(room.index)
@@ -702,7 +790,7 @@ export class Game {
       }
       return;
     }
-    if (this.zombies.some((z) => z.room === room.index)) return;
+    if (this.zombies.some((z) => z.room === room.index && z.state !== 'lying')) return;
     // Úsek vyčistený: brány sa otvoria a v strede zostane odmena.
     this.cleared.add(room.index);
     this.hordeRoom = -1;
@@ -754,6 +842,7 @@ export class Game {
       dirX: 0,
       dirY: 0,
       burn: 0,
+      twitch: 0,
     };
     if (kind === 'boss') z.hp = ZOMBIES.boss.hp + this.level * 12;
     z.maxHp = z.hp;
@@ -818,6 +907,11 @@ export class Game {
           this.killZombie(z, z.angle);
           continue;
         }
+      }
+      if (z.state === 'lying' || z.state === 'rising') {
+        this.updateLurker(z, dt);
+        if (this.respawn > 0 || this.over) return;
+        continue;
       }
       const def = ZOMBIES[z.kind];
       const toX = p.x - z.x;
@@ -954,6 +1048,54 @@ export class Game {
     }
   }
 
+  /**
+   * Falošný mŕtvy: leží a občas sa šklbne (varovanie). Keď ho hráč obíde a otočí sa
+   * k nemu chrbtom (alebo stúpi úplne k nemu), vstane a schmatne ho zozadu.
+   */
+  private updateLurker(z: Zombie, dt: number): void {
+    const p = this.player;
+    const dx = p.x - z.x;
+    const dy = p.y - z.y;
+    const dist = Math.hypot(dx, dy);
+    z.vx = 0;
+    z.vy = 0;
+    z.twitch = Math.max(0, z.twitch - dt);
+    z.stateTime -= dt;
+    if (z.state === 'lying') {
+      z.timer -= dt;
+      if (z.timer <= 0) {
+        z.timer = 2 + this.surprise() * 2.5;
+        if (dist < 150) {
+          z.twitch = 0.3;
+          this.events.push({ type: 'twitch', x: z.x, y: z.y });
+        }
+      }
+      // Hráč je chrbtom: zombie je za smerom, kam mieri.
+      const behind = Math.cos(Math.atan2(-dy, -dx) - p.angle) < 0.2;
+      const hit = z.hp < z.maxHp;
+      if (hit || dist < LURKER_CLOSE || (dist < LURKER_REACH && behind)) {
+        z.state = 'rising';
+        z.stateTime = hit ? 0.2 : LURKER_RISE;
+        z.angle = Math.atan2(dy, dx);
+        this.lurkers[z.lurker!]!.done = true;
+        this.events.push({ type: 'lurkerRise', x: z.x, y: z.y });
+      }
+      return;
+    }
+    // Vstáva: na konci schmatne hráča, ak je stále na dosah.
+    z.angle = Math.atan2(dy, dx);
+    if (z.stateTime > 0) return;
+    z.state = 'normal';
+    z.aware = true;
+    z.cooldown = 0.8;
+    const def = ZOMBIES[z.kind];
+    if (dist < def.radius + PLAYER_RADIUS + 8 && this.respawn <= 0 && p.hurt === 0) {
+      p.grabbed = 0.8;
+      this.events.push({ type: 'grab', x: p.x, y: p.y });
+      this.damagePlayer(def.damage);
+    }
+  }
+
   /** Pľuvance letia rovno, zastaví ich stena alebo hráč. */
   private updateSpits(dt: number): void {
     const p = this.player;
@@ -1023,7 +1165,10 @@ export class Game {
   /** Zombie zostávajúce v aktívnej horde (na scéne + čakajúce), inak null. */
   get hordeRemaining(): number | null {
     if (this.hordeRoom < 0) return null;
-    return this.hordeQueue.length + this.zombies.filter((z) => z.room === this.hordeRoom).length;
+    return (
+      this.hordeQueue.length +
+      this.zombies.filter((z) => z.room === this.hordeRoom && z.state !== 'lying').length
+    );
   }
 
   /** Kam ísť ďalej: otvorená výstupná brána aktuálneho úseku alebo heliport. */

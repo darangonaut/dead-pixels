@@ -64,6 +64,7 @@ const sk = {
   grabbed: 'Chytil ťa zozadu!',
   blackout: 'Výpadok prúdu…',
   powerBack: 'Prúd je späť',
+  carAlarm: 'Alarm auta! Zbieha sa sem všetko živé aj mŕtve.',
 };
 
 type Key = keyof typeof sk;
@@ -132,6 +133,7 @@ const en: Record<Key, string> = {
   grabbed: 'Grabbed from behind!',
   blackout: 'Power outage…',
   powerBack: 'The power is back',
+  carAlarm: 'Car alarm! Everything nearby is coming this way.',
 };
 
 const KEY = 'deadpixels.language';

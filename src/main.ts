@@ -132,16 +132,19 @@ function showBanner(text: string, seconds = 2): void {
 }
 
 let toastTimer = 0;
-function showToast(text: string): void {
+function showToast(text: string, seconds = 1.2): void {
   toast.textContent = text;
   toast.classList.add('show');
-  toastTimer = 1.2;
+  toastTimer = Math.max(seconds, text.length / 22);
 }
+/** Prvý alarm auta v hre dostane vysvetlenie. */
+let alarmHinted = false;
 
 let seed = 0;
 
 async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<void> {
   sound.start();
+  alarmHinted = false;
   if (resumeSeed !== undefined) seed = resumeSeed;
   else if (level === 1 || !seed) seed = Math.floor(Math.random() * 1e9);
   // Postup sa uloží na začiatku každej úrovne (od druhej).
@@ -366,6 +369,10 @@ function react(events: GameEvent[], g: Game): void {
     if (e.type === 'room' && e.room === g.map.rooms.length - 1) showBanner(t('reachExit'), 2);
     if (e.type === 'boss') showBanner(t('boss'), 2);
     if (e.type === 'blackout') showBanner(t('blackout'), 1.8);
+    if (e.type === 'alarm' && !alarmHinted) {
+      alarmHinted = true;
+      showToast(t('carAlarm'));
+    }
     if (e.type === 'powerBack') showToast(t('powerBack'));
     if (e.type === 'grab') {
       showToast(t('grabbed'));

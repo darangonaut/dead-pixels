@@ -1,6 +1,8 @@
 import { FlowField } from './flowfield';
 import { castRay, lineOfSight, moveCircle, type Vec } from './geometry';
 import {
+  carHasAlarm,
+  carHead,
   FINAL_LEVEL,
   generateLevel,
   isOpaque,
@@ -64,6 +66,19 @@ export interface Zombie {
   twitch: number;
   /** Index vo `Game.lurkers`, ak je to falošný mŕtvy. */
   lurker?: number;
+  /** Láka ju zvuk (alarm auta): kam ide a ako dlho ešte (s). */
+  lure: Vec | null;
+  lureTime: number;
+}
+
+/** Spustený alarm auta: húka, bliká a láka zombie z okolia. */
+export interface CarAlarm {
+  /** Predná časť auta (index políčka). */
+  tile: number;
+  x: number;
+  y: number;
+  /** Zostávajúci čas (s). */
+  t: number;
 }
 
 /**
@@ -203,6 +218,8 @@ export type GameEvent =
   | { type: 'blackout' }
   | { type: 'scream'; x: number; y: number }
   | { type: 'powerBack' }
+  | { type: 'alarm'; x: number; y: number }
+  | { type: 'alarmEnd'; tile: number }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
@@ -231,6 +248,9 @@ const LURKER_RISE = 0.5;
 const OUTAGE_FLICKER = 1.2;
 const OUTAGE_SCREAM = 1.4;
 const OUTAGE_HORDE = 3;
+/** Alarm auta: ako dlho húka (s) a odkiaľ priláka zombie (px). */
+export const ALARM_TIME = 9;
+const ALARM_RANGE = 280;
 const SPIT_SPEED = 110;
 
 /** Zloženie hordy v úseku podľa úrovne. */
@@ -295,6 +315,9 @@ export class Game {
   private readonly surprise: () => number;
   readonly lurkers: Lurker[] = [];
   outage: Outage | null = null;
+  alarms: CarAlarm[] = [];
+  /** Autá, ktorých alarm už húkal (každé len raz). */
+  private alarmed = new Set<number>();
 
   constructor(seed: number, level = 1, carry?: Carry) {
     this.level = level;
@@ -448,6 +471,7 @@ export class Game {
       this.flow.update(this.player.x, this.player.y);
     }
     this.updateHorde(dt);
+    this.updateAlarms(dt);
     this.updateZombies(dt);
     this.updateSpits(dt);
     this.updateGrenades(dt);
@@ -663,6 +687,7 @@ export class Game {
       if (best.hp <= 0) this.killZombie(best, angle);
       else this.events.push({ type: 'hit', x: best.x, y: best.y, angle, kind: best.kind });
     } else if (barrelHit) this.destroyBarrel(hx, hy);
+    else if (wall < range) this.triggerAlarm(hx, hy);
     return { x: from.x + dx * bestT, y: from.y + dy * bestT };
   }
 
@@ -703,6 +728,8 @@ export class Game {
           Math.hypot((tx + 0.5) * TILE - x, (ty + 0.5) * TILE - y) < radius
         )
           this.destroyBarrel(tx, ty);
+        else if (Math.hypot((tx + 0.5) * TILE - x, (ty + 0.5) * TILE - y) < radius)
+          this.triggerAlarm(tx, ty);
     const zombieDamage = source === 'zombie' ? 5 : 9;
     for (const z of [...this.zombies]) {
       const dz = Math.hypot(z.x - x, z.y - y);
@@ -934,6 +961,8 @@ export class Game {
       dirY: 0,
       burn: 0,
       twitch: 0,
+      lure: null,
+      lureTime: 0,
     };
     if (kind === 'boss') z.hp = ZOMBIES.boss.hp + this.level * 12;
     z.maxHp = z.hp;
@@ -982,6 +1011,8 @@ export class Game {
       if (room.doorIn !== null) this.setGate(room.doorIn, true);
       if (room.doorOut !== null) this.setGate(room.doorOut, true);
     }
+    for (const alarm of this.alarms) this.events.push({ type: 'alarmEnd', tile: alarm.tile });
+    this.alarms = [];
     this.hordeQueue = [];
     this.hordeRoom = -1;
     this.spits = [];
@@ -1057,7 +1088,20 @@ export class Game {
         } else speed = 0;
       }
 
-      if (z.aware && speed > 0) {
+      // Alarm auta: zombie ide za zvukom, kým nemá hráča priamo pred sebou.
+      z.lureTime = Math.max(0, z.lureTime - dt);
+      const lure = z.lureTime > 0 && !(sees && dist < 80) ? z.lure : null;
+      if (lure && speed > 0) {
+        const lx = lure.x - z.x;
+        const ly = lure.y - z.y;
+        const ld = Math.hypot(lx, ly) || 1;
+        // Pri aute postáva a búcha doň.
+        if (ld > 16) {
+          ax = lx / ld;
+          ay = ly / ld;
+        } else speed *= 0.15;
+        z.angle = Math.atan2(ly, lx);
+      } else if (z.aware && speed > 0) {
         // Blízko a na dohľad: rovno k hráčovi, inak po mape vzdialeností.
         let dir: Vec | null =
           dist < 70 && sees ? { x: toX / dist, y: toY / dist } : this.flow.direction(z.x, z.y);
@@ -1194,6 +1238,53 @@ export class Game {
       this.events.push({ type: 'grab', x: p.x, y: p.y });
       this.damagePlayer(def.damage);
     }
+  }
+
+  /**
+   * Zásah auta spustí alarm (ak ho auto má a ešte nehúkalo): z okolia pribehnú ďalšie
+   * zombie a všetky v dosahu idú k autu — dá sa to použiť ako návnada.
+   */
+  private triggerAlarm(tx: number, ty: number): void {
+    const head = carHead(this.map, tx, ty);
+    if (head === null || this.alarmed.has(head) || !carHasAlarm(this.map, head)) return;
+    this.alarmed.add(head);
+    const hx = head % this.map.width;
+    const hy = Math.floor(head / this.map.width);
+    const horizontal = (this.map.variant[head]! & 0x10) !== 0;
+    const at = {
+      x: (hx + (horizontal ? 1 : 0.5)) * TILE,
+      y: (hy + (horizontal ? 0.5 : 1)) * TILE,
+    };
+    this.alarms.push({ tile: head, ...at, t: ALARM_TIME });
+    this.events.push({ type: 'alarm', ...at });
+    // Mimo hordy pribehnú ďalšie zombie z tmy.
+    const room = this.map.rooms[this.room];
+    if (this.hordeRoom >= 0 || !room) return;
+    const count = 2 + Math.floor(this.level / 2);
+    for (let i = 0; i < count; i++) {
+      const spot = this.spawnPoint(room);
+      if (!spot) break;
+      const kind: ZombieKind = this.level >= 2 && this.rng() < 0.35 ? 'runner' : 'walker';
+      const z = this.spawnZombie(kind, spot.x, spot.y, room.index);
+      z.aware = false;
+      z.lure = { ...at };
+      z.lureTime = 1;
+    }
+  }
+
+  /** Húkajúce alarmy lákajú zombie v dosahu k autu. */
+  private updateAlarms(dt: number): void {
+    for (const alarm of this.alarms) {
+      alarm.t -= dt;
+      for (const z of this.hash.near(alarm.x, alarm.y, ALARM_RANGE, this.nearby)) {
+        if (z.kind === 'boss' || z.state === 'lying' || z.state === 'rising') continue;
+        z.lure = { x: alarm.x, y: alarm.y };
+        z.lureTime = 0.6;
+      }
+    }
+    for (const alarm of this.alarms.filter((a) => a.t <= 0))
+      this.events.push({ type: 'alarmEnd', tile: alarm.tile });
+    this.alarms = this.alarms.filter((a) => a.t > 0);
   }
 
   /** Pľuvance letia rovno, zastaví ich stena alebo hráč. */

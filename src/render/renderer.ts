@@ -159,6 +159,8 @@ export class Renderer {
   private grenadeSprites: Sprite[] = [];
   private barrelSprites = new Map<number, Sprite>();
   private flameTex: Texture[] = [];
+  /** Blikajúce svetlá áut s alarmom (podľa políčka auta). */
+  private alarmGlows = new Map<number, Sprite>();
   private grenadeTex: Texture[] = [];
 
   constructor(private readonly game: Game) {}
@@ -555,6 +557,31 @@ export class Renderer {
       this.arrow.alpha = 0.55 + 0.35 * Math.sin(game.time * 5);
     }
     this.beacon.alpha = 0.25 + 0.2 * Math.sin(game.time * 4);
+    // Alarm auta: smerovky blikajú oranžovo a osvetľujú okolie.
+    const blink = Math.floor(game.time * 2.5) % 2 === 0;
+    const sounding = new Set<number>();
+    for (const alarm of game.alarms) {
+      sounding.add(alarm.tile);
+      let glow = this.alarmGlows.get(alarm.tile);
+      if (!glow) {
+        glow = new Sprite(this.tex.light);
+        glow.anchor.set(0.5);
+        glow.position.set(alarm.x, alarm.y);
+        glow.width = glow.height = 90;
+        glow.tint = 0xffa030;
+        glow.blendMode = 'add';
+        this.glow.addChild(glow);
+        this.alarmGlows.set(alarm.tile, glow);
+      }
+      glow.visible = blink;
+      glow.alpha = 0.55;
+      if (blink) this.flashes.push({ x: alarm.x, y: alarm.y, size: 64, age: 0, life: 0.05 });
+    }
+    for (const [tile, glow] of this.alarmGlows)
+      if (!sounding.has(tile)) {
+        glow.destroy();
+        this.alarmGlows.delete(tile);
+      }
     if (this.rotor) this.rotor.rotation += dt * 18;
     // Granáty (blikajúca poistka).
     while (this.grenadeSprites.length < game.grenades.length) {

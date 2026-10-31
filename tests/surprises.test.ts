@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Game, type GameEvent, type Input } from '@/game/game';
+import { castRay } from '@/game/geometry';
+import { ALARM_TIME, Game, type GameEvent, type Input } from '@/game/game';
+import { carHasAlarm, carHead, isSolid, Tile, TILE, tileAt } from '@/game/map';
 
 const idle: Input = {
   moveX: 0,
@@ -134,5 +136,92 @@ describe('výpadok prúdu', () => {
     expect(game.lampsPower).toBe(1);
     expect(game.map.gates[room.doorIn!]!.open).toBe(true);
     expect(game.map.gates[room.doorOut!]!.open).toBe(true);
+  });
+});
+
+/** Auto s alarmom a miesto, odkiaľ naň hráč vidí (voľná čiara 2–4 políčka). */
+function carTarget(game: Game) {
+  const m = game.map;
+  for (let ty = 1; ty < m.height - 1; ty++)
+    for (let tx = 1; tx < m.width - 1; tx++) {
+      const head = carHead(m, tx, ty);
+      if (head === null || !carHasAlarm(m, head) || m.roomOf[ty * m.width + tx]! < 0) continue;
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const)
+        for (let d = 2; d <= 4; d++) {
+          const sx = tx + dx * d;
+          const sy = ty + dy * d;
+          if (isSolid(m, sx, sy) || m.roomOf[sy * m.width + sx]! < 0) continue;
+          const from = { x: (sx + 0.5) * TILE, y: (sy + 0.5) * TILE };
+          const target = { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
+          const a = Math.atan2(target.y - from.y, target.x - from.x);
+          const free = castRay(m, from.x, from.y, Math.cos(a), Math.sin(a), 80);
+          // Lúč musí doletieť až k autu (pred ním nič iné).
+          const hit = {
+            x: from.x + Math.cos(a) * (free + 1),
+            y: from.y + Math.sin(a) * (free + 1),
+          };
+          if (tileAt(m, Math.floor(hit.x / TILE), Math.floor(hit.y / TILE)) !== Tile.Car) continue;
+          if (carHead(m, Math.floor(hit.x / TILE), Math.floor(hit.y / TILE)) !== head) continue;
+          return { head, from, angle: a, room: m.roomOf[sy * m.width + sx]! };
+        }
+    }
+  return null;
+}
+
+describe('alarm auta', () => {
+  it('výstrel do auta spustí alarm, zbehnú sa zombie a idú k autu; auto húka len raz', () => {
+    const game = findGame(3, (g) => carTarget(g) !== null);
+    const target = carTarget(game)!;
+    const p = game.player;
+    p.hp = 1e6;
+    p.x = target.from.x;
+    p.y = target.from.y;
+    game.room = -1;
+    run(game, 0.05);
+    game.zombies = [];
+    const before = game.zombies.length;
+    const fire: Input = { ...idle, aim: target.angle, firing: true };
+    game.update(1 / 60, fire);
+    const events = game.takeEvents();
+    expect(events.some((e) => e.type === 'alarm')).toBe(true);
+    expect(game.alarms).toHaveLength(1);
+    expect(game.alarms[0]!.tile).toBe(target.head);
+    // Pribehli ďalšie zombie (v tichom úseku) a všetky v dosahu idú k autu.
+    if (game.map.rooms[game.room]!.encounter !== 'horde') {
+      expect(game.zombies.length).toBeGreaterThan(before);
+      const alarm = game.alarms[0]!;
+      const far = game.zombies.map((z) => Math.hypot(z.x - alarm.x, z.y - alarm.y));
+      run(game, 1.5);
+      const near = game.zombies.map((z) => Math.hypot(z.x - alarm.x, z.y - alarm.y));
+      expect(near.reduce((a, b) => a + b, 0)).toBeLessThan(far.reduce((a, b) => a + b, 0));
+    }
+    // Druhý výstrel do toho istého auta nový alarm nespustí.
+    game.player.cooldown = 0;
+    game.update(1 / 60, fire);
+    expect(game.takeEvents().some((e) => e.type === 'alarm')).toBe(false);
+    // Po čase alarm stíchne.
+    game.zombies = [];
+    const rest = run(game, ALARM_TIME);
+    expect(rest.some((e) => e.type === 'alarmEnd')).toBe(true);
+    expect(game.alarms).toHaveLength(0);
+  });
+
+  it('vyhorené autá alarm nemajú, zvyšné zhruba polovica', () => {
+    const game = new Game(7, 3);
+    const m = game.map;
+    let cars = 0;
+    let withAlarm = 0;
+    for (let i = 0; i < m.tiles.length; i++) {
+      if (m.tiles[i] !== Tile.Car || m.variant[i]! & 0x20) continue;
+      cars++;
+      if (carHasAlarm(m, i)) withAlarm++;
+    }
+    expect(cars).toBeGreaterThan(0);
+    expect(withAlarm).toBeLessThan(cars);
   });
 });

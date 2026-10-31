@@ -153,12 +153,8 @@ function pointInPolygon(x: number, y: number, points: readonly Point[]): boolean
   return inside;
 }
 
-/** Deterministický šum 0–1 pre pixel (textúry, dithering). */
-export function pixelNoise(x: number, y: number, seed: number): number {
-  let h = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1442695041, 2246822519) ^ seed;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
+/** Deterministický šum 0–1 pre pixel (textúry, dithering) — ten istý ako pre políčka mapy. */
+export { cellNoise as pixelNoise } from '@/game/map';
 
 export function shade(color: Rgb, factor: number): Rgb {
   const r = Math.min(255, Math.round(((color >> 16) & 0xff) * factor));

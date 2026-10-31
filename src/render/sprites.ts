@@ -1,4 +1,5 @@
 import {
+  carBurnt,
   PARKING_LINE,
   ROAD_LINE_H,
   ROAD_LINE_V,
@@ -616,7 +617,7 @@ export function drawProps(map: CityMap): PixelCanvas {
     for (let x = 0; x < map.width; x++) {
       if (at(x, y) !== Tile.Car || v(x, y) & 0x20) continue;
       const horizontal = (v(x, y) & 0x10) !== 0;
-      const burnt = pixelNoise(x, y, 61) < 0.25;
+      const burnt = carBurnt(x, y);
       const kind = v(x, y) & 0x0f;
       const body = burnt ? 0x3a3a3a : CARS[kind]!;
       const car = drawCar(body, burnt, kind === 5, x * 7 + y);

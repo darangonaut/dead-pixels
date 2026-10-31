@@ -1,4 +1,4 @@
-import type { GameEvent } from '@/game/game';
+import { ALARM_TIME, type GameEvent } from '@/game/game';
 
 /**
  * Zvuky generované v prehliadači (Web Audio): výstrely, zásahy, zombie, predmety
@@ -16,6 +16,8 @@ export class Sound {
   private nextIntensity = 0;
   private step = 0;
   private nextTime = 0;
+  /** Húkajúce alarmy áut (aby sa dali umlčať po návrate na kontrolný bod). */
+  private sirens = new Map<number, { osc: OscillatorNode; gain: GainNode }>();
 
   /** Prehliadač povolí zvuk až po interakcii hráča. */
   start(): void {
@@ -343,6 +345,39 @@ export class Sound {
         case 'powerBack':
           this.tone('sine', 50, 110, 0.7, 0.2);
           this.burst(0.08, 3000, 0.15, 2);
+          break;
+        case 'alarm': {
+          // Autoalarm: striedavé húkanie dvoch tónov počas celého trvania.
+          const ctx = this.ctx;
+          const t0 = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          osc.type = 'square';
+          const gain = ctx.createGain();
+          const d = Math.hypot(e.x - listener.x, e.y - listener.y);
+          const vol = 0.06 * Math.max(0.4, 1 - d / 300);
+          gain.gain.setValueAtTime(vol, t0);
+          gain.gain.setValueAtTime(vol, t0 + ALARM_TIME - 0.3);
+          gain.gain.linearRampToValueAtTime(0.0001, t0 + ALARM_TIME);
+          for (let k = 0; k < ALARM_TIME / 0.3; k++)
+            osc.frequency.setValueAtTime(k % 2 ? 1040 : 760, t0 + k * 0.3);
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = 2400;
+          osc.connect(lp).connect(gain).connect(this.master!);
+          osc.start(t0);
+          osc.stop(t0 + ALARM_TIME + 0.1);
+          const key = Math.round(e.x) * 4096 + Math.round(e.y);
+          this.sirens.set(key, { osc, gain });
+          osc.onended = () => this.sirens.delete(key);
+          break;
+        }
+        case 'alarmEnd':
+        case 'respawn':
+          if (e.type === 'respawn')
+            for (const siren of this.sirens.values()) {
+              siren.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+              siren.gain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.05);
+            }
           break;
         case 'grab':
           this.tone('square', 150, 60, 0.3, 0.2);

@@ -144,6 +144,32 @@ export const isSolid = (map: CityMap, tx: number, ty: number): boolean =>
 export const isOpaque = (map: CityMap, tx: number, ty: number): boolean =>
   OPAQUE.has(tileAt(map, tx, ty));
 
+/** Deterministický šum 0–1 pre bunku (x, y) — zdieľa ho logika aj kreslenie. */
+export function cellNoise(x: number, y: number, seed: number): number {
+  let h = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1442695041, 2246822519) ^ seed;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** Vyhorené auto (podľa políčka prednej časti) — kreslí sa čierne, nemá alarm. */
+export const carBurnt = (tx: number, ty: number): boolean => cellNoise(tx, ty, 61) < 0.25;
+
+/** Predná časť auta (index políčka), na ktoré patrí políčko (tx, ty), inak null. */
+export function carHead(map: CityMap, tx: number, ty: number): number | null {
+  if (tileAt(map, tx, ty) !== Tile.Car) return null;
+  const v = map.variant[ty * map.width + tx]!;
+  if (!(v & 0x20)) return ty * map.width + tx;
+  // Zadná časť: predná je vľavo (vodorovné auto) alebo hore.
+  return v & 0x10 ? ty * map.width + tx - 1 : (ty - 1) * map.width + tx;
+}
+
+/** Auto s alarmom: asi polovica áut, ktoré nie sú vyhorené. */
+export function carHasAlarm(map: CityMap, head: number): boolean {
+  const tx = head % map.width;
+  const ty = Math.floor(head / map.width);
+  return !carBurnt(tx, ty) && cellNoise(tx, ty, 91) < 0.5;
+}
+
 /** Otvorí alebo zatvorí bránu (zmení priechodnosť mapy). */
 export function setGate(map: CityMap, id: number, open: boolean): void {
   const gate = map.gates[id];

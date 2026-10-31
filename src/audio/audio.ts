@@ -205,6 +205,34 @@ export class Sound {
     osc.stop(t + duration + 0.02);
   }
 
+  /** Hlas (výkrik o pomoc): pílový tón cez dva formanty samohlásky „o“. */
+  private voice(from: number, to: number, duration: number, gain: number, delay: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(from, t);
+    osc.frequency.linearRampToValueAtTime(to, t + duration);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.04);
+    g.gain.setValueAtTime(gain, t + duration * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    for (const [f, q] of [
+      [560, 4],
+      [900, 5],
+    ] as const) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f;
+      bp.Q.value = q;
+      osc.connect(bp).connect(g);
+    }
+    g.connect(this.master!);
+    osc.start(t);
+    osc.stop(t + duration + 0.05);
+  }
+
   /** Temný ambient: dva rozladené nízke tóny a šum vetra. */
   private ambient(): void {
     const ctx = this.ctx!;
@@ -378,6 +406,25 @@ export class Sound {
               siren.gain.gain.cancelScheduledValues(this.ctx.currentTime);
               siren.gain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.05);
             }
+          break;
+        case 'survivorCall': {
+          // „Pomóóc!“ — hlas cez formantový filter, tichší z diaľky.
+          const d = Math.hypot(e.x - listener.x, e.y - listener.y);
+          const vol = 0.2 * Math.max(0.4, 1 - d / 220);
+          this.voice(330, 420, 0.22, vol, 0);
+          this.voice(420, 300, 0.5, vol, 0.24);
+          break;
+        }
+        case 'survivorGift':
+          for (let k = 0; k < 3; k++) this.burst(0.1, 320, 0.45, 1, 0.25 + k * 0.16);
+          this.voice(380, 300, 0.4, 0.12, 0);
+          break;
+        case 'survivorTrap':
+          // Rozbité sklo, výkrik a hrdelný ston zombie v byte.
+          this.burst(0.5, 7000, 0.6, 0.5);
+          this.burst(0.25, 4500, 0.4, 1, 0.12);
+          this.voice(600, 900, 0.5, 0.18, 0.05);
+          this.tone('sawtooth', 140, 70, 1.3, 0.25);
           break;
         case 'grab':
           this.tone('square', 150, 60, 0.3, 0.2);

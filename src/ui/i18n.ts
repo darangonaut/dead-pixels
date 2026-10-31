@@ -65,6 +65,9 @@ const sk = {
   blackout: 'Výpadok prúdu…',
   powerBack: 'Prúd je späť',
   carAlarm: 'Alarm auta! Zbieha sa sem všetko živé aj mŕtve.',
+  survivorCall: '„Pomoc! Tu hore, v okne!“',
+  survivorGift: '„Chyť to! Viac toho nemám…“',
+  survivorTrap: 'Pasca! Byt je plný zombie!',
 };
 
 type Key = keyof typeof sk;
@@ -134,6 +137,9 @@ const en: Record<Key, string> = {
   blackout: 'Power outage…',
   powerBack: 'The power is back',
   carAlarm: 'Car alarm! Everything nearby is coming this way.',
+  survivorCall: '"Help! Up here, in the window!"',
+  survivorGift: '"Catch! It\'s all I have…"',
+  survivorTrap: 'A trap! The flat is full of zombies!',
 };
 
 const KEY = 'deadpixels.language';

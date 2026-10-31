@@ -225,3 +225,57 @@ describe('alarm auta', () => {
     expect(withAlarm).toBeLessThan(cars);
   });
 });
+
+/** Hráča postaví do úseku preživšieho a potom pred okno (vo vzdialenosti `d`). */
+function approachSurvivor(game: Game, d: number): GameEvent[] {
+  const sv = game.survivor!;
+  const room = game.map.rooms[sv.room]!;
+  const p = game.player;
+  p.hp = 1e6;
+  p.x = room.entry.x;
+  p.y = room.entry.y;
+  game.room = sv.room - 1;
+  const events = run(game, 0.05);
+  game.zombies = [];
+  const front = game.survivorFront!;
+  p.x = front.x + sv.dirX * d;
+  p.y = front.y + sv.dirY * d;
+  return [...events, ...run(game, 0.5)];
+}
+
+describe('preživší v okne', () => {
+  it('na 1. úrovni je vždy a nie je to pasca; okno je v stene pri voľnom mieste', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const g = new Game(seed, 1);
+      const sv = g.survivor!;
+      expect(sv).not.toBeNull();
+      expect(sv.trap).toBe(false);
+      expect(tileAt(g.map, Math.floor(sv.x / TILE), Math.floor(sv.y / TILE))).toBe(Tile.Building);
+      const f = g.survivorFront!;
+      expect(isSolid(g.map, Math.floor(f.x / TILE), Math.floor(f.y / TILE))).toBe(false);
+    }
+  });
+
+  it('volá o pomoc a pri okne hodí zásoby', () => {
+    const game = findGame(1, (g) => g.survivor !== null);
+    const call = approachSurvivor(game, 90);
+    expect(call.some((e) => e.type === 'survivorCall' && e.first)).toBe(true);
+    const before = game.pickups.length;
+    const gift = approachSurvivor(game, 30);
+    expect(gift.some((e) => e.type === 'survivorGift')).toBe(true);
+    expect(game.pickups.length).toBe(before + 3);
+    expect(game.survivor!.phase).toBe('gift');
+  });
+
+  it('pasca: z okna sa vyvalí skupina zombie', () => {
+    const game = findGame(4, (g) => g.survivor !== null);
+    game.survivor!.trap = true;
+    approachSurvivor(game, 90);
+    const events = approachSurvivor(game, 0);
+    expect(events.some((e) => e.type === 'survivorTrap')).toBe(true);
+    run(game, 3);
+    const front = game.survivorFront!;
+    const near = game.zombies.filter((z) => Math.hypot(z.x - front.x, z.y - front.y) < 120);
+    expect(near.length).toBeGreaterThanOrEqual(4);
+  });
+});

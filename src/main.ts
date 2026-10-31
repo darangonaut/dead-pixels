@@ -369,6 +369,12 @@ function react(events: GameEvent[], g: Game): void {
     if (e.type === 'room' && e.room === g.map.rooms.length - 1) showBanner(t('reachExit'), 2);
     if (e.type === 'boss') showBanner(t('boss'), 2);
     if (e.type === 'blackout') showBanner(t('blackout'), 1.8);
+    if (e.type === 'survivorCall' && e.first) showBanner(t('survivorCall'), 2.2);
+    if (e.type === 'survivorGift') showBanner(t('survivorGift'), 2);
+    if (e.type === 'survivorTrap') {
+      showBanner(t('survivorTrap'), 2);
+      navigator.vibrate?.(120);
+    }
     if (e.type === 'alarm' && !alarmHinted) {
       alarmHinted = true;
       showToast(t('carAlarm'));

@@ -33,6 +33,7 @@ import {
   drawSpit,
   drawProps,
   drawRoofs,
+  drawWindow,
   drawZombie,
   lightCanvas,
 } from './sprites';
@@ -159,6 +160,10 @@ export class Renderer {
   private grenadeSprites: Sprite[] = [];
   private barrelSprites = new Map<number, Sprite>();
   private flameTex: Texture[] = [];
+  /** Okno s preživším (nad strechami, viditeľné aj v tme). */
+  private windowLayer = new Container();
+  private windowSprite: Sprite | null = null;
+  private windowTex: Texture[] = [];
   /** Blikajúce svetlá áut s alarmom (podľa políčka auta). */
   private alarmGlows = new Map<number, Sprite>();
   private grenadeTex: Texture[] = [];
@@ -248,6 +253,17 @@ export class Renderer {
 
     this.player.anchor.set(0.5);
     this.actors.addChild(this.player);
+    const sv = this.game.survivor;
+    if (sv) {
+      this.windowTex = [drawWindow(0, false), drawWindow(1, false), drawWindow(0, true)].map(
+        texture,
+      );
+      this.windowSprite = new Sprite(this.windowTex[0]);
+      this.windowSprite.anchor.set(0.5);
+      this.windowSprite.position.set(sv.x, sv.y);
+      this.windowSprite.rotation = Math.atan2(sv.dirY, sv.dirX);
+      this.windowLayer.addChild(this.windowSprite);
+    }
     this.lightGfx.blendMode = 'erase';
     this.lightRoot.addChild(this.lightGfx);
     this.flashRoot.addChild(this.lightSprites);
@@ -320,7 +336,7 @@ export class Renderer {
       this.darkSprite = new Sprite(this.dark);
       // Mäkké okraje svetla.
       this.darkSprite.filters = [new BlurFilter({ strength: 3, quality: 2 })];
-      this.world.addChild(this.darkSprite, this.roofs, this.arrow);
+      this.world.addChild(this.darkSprite, this.roofs, this.windowLayer, this.arrow);
     }
   }
 
@@ -437,6 +453,23 @@ export class Renderer {
           break;
         case 'bossStun':
           this.shake = Math.max(this.shake, 4);
+          break;
+        case 'survivorTrap':
+          this.shake = Math.max(this.shake, 3);
+          for (let i = 0; i < 12; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = 30 + Math.random() * 90;
+            this.particle(
+              this.tex.spark,
+              e.x,
+              e.y,
+              Math.cos(a) * sp,
+              Math.sin(a) * sp,
+              0.4,
+              false,
+              4,
+            );
+          }
           break;
         case 'lurkerRise':
           this.shake = Math.max(this.shake, 2);
@@ -557,6 +590,16 @@ export class Renderer {
       this.arrow.alpha = 0.55 + 0.35 * Math.sin(game.time * 5);
     }
     this.beacon.alpha = 0.25 + 0.2 * Math.sin(game.time * 4);
+    // Preživší v okne: máva (pri volaní rýchlo), svetlo izby dopadá pred okno.
+    const sv = game.survivor;
+    const front = game.survivorFront;
+    if (sv && front && this.windowSprite) {
+      const fast = sv.phase === 'calling';
+      const frame = Math.floor(game.time * (fast ? 5 : 1.5)) % 2;
+      this.windowSprite.texture = this.windowTex[sv.phase === 'trap' ? 2 : frame]!;
+      if (sv.phase !== 'trap')
+        this.flashes.push({ x: front.x, y: front.y, size: 60, age: 0, life: 0.05 });
+    }
     // Alarm auta: smerovky blikajú oranžovo a osvetľujú okolie.
     const blink = Math.floor(game.time * 2.5) % 2 === 0;
     const sounding = new Set<number>();

@@ -92,6 +92,24 @@ export interface Outage {
   t: number;
 }
 
+/**
+ * Preživší v okne: volá o pomoc. Keď k nemu hráč príde, hodí mu zásoby — alebo je to
+ * pasca a z bytu za ním sa vyvalí skupina zombie.
+ */
+export interface Survivor {
+  room: number;
+  /** Stred okna (políčko steny budovy). */
+  x: number;
+  y: number;
+  /** Smer z okna do úseku (jednotkový). */
+  dirX: number;
+  dirY: number;
+  trap: boolean;
+  phase: 'waiting' | 'calling' | 'gift' | 'trap';
+  /** Čas do ďalšieho volania (s). */
+  t: number;
+}
+
 /** Falošný mŕtvy: leží pri ceste ako mŕtvola a vstane, keď okolo neho hráč prejde. */
 export interface Lurker {
   room: number;
@@ -220,6 +238,9 @@ export type GameEvent =
   | { type: 'powerBack' }
   | { type: 'alarm'; x: number; y: number }
   | { type: 'alarmEnd'; tile: number }
+  | { type: 'survivorCall'; x: number; y: number; first: boolean }
+  | { type: 'survivorGift'; x: number; y: number }
+  | { type: 'survivorTrap'; x: number; y: number }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
@@ -251,6 +272,9 @@ const OUTAGE_HORDE = 3;
 /** Alarm auta: ako dlho húka (s) a odkiaľ priláka zombie (px). */
 export const ALARM_TIME = 9;
 const ALARM_RANGE = 280;
+/** Preživší: odkiaľ ho hráč počuje volať a ako blízko musí prísť k oknu (px). */
+const SURVIVOR_HEAR = 150;
+const SURVIVOR_REACH = 40;
 const SPIT_SPEED = 110;
 
 /** Zloženie hordy v úseku podľa úrovne. */
@@ -316,6 +340,9 @@ export class Game {
   readonly lurkers: Lurker[] = [];
   outage: Outage | null = null;
   alarms: CarAlarm[] = [];
+  survivor: Survivor | null = null;
+  /** Zombie, ktoré sa ešte vyvalia z okna (pasca). */
+  private ambush = { left: 0, timer: 0 };
   /** Autá, ktorých alarm už húkal (každé len raz). */
   private alarmed = new Set<number>();
 
@@ -361,6 +388,70 @@ export class Game {
     this.surprise = createRng(seed ^ 0x5eed ^ Math.imul(level, 7919));
     this.planLurkers();
     this.planOutage();
+    this.planSurvivor();
+  }
+
+  /** Bod pred oknom preživšieho (v úseku). */
+  get survivorFront(): Vec | null {
+    const sv = this.survivor;
+    return sv ? { x: sv.x + sv.dirX * TILE, y: sv.y + sv.dirY * TILE } : null;
+  }
+
+  /**
+   * Preživší v okne: na 1. úrovni vždy (a skutočný), potom v asi 70 % úrovní;
+   * od 2. úrovne je to v 40 % prípadov pasca. Okno je v stene tichého úseku pri ceste.
+   */
+  private planSurvivor(): void {
+    if (this.level > 1 && this.surprise() >= 0.7) return;
+    const trap = this.level > 1 && this.surprise() < 0.4;
+    const taken = new Set([...this.lurkers.map((l) => l.room), this.outage?.room]);
+    // Najprv úseky bez iného prekvapenia (v náhodnom poradí), potom ostatné tiché.
+    const quiet = this.quietRooms().sort(() => this.surprise() - 0.5);
+    const order = [
+      ...quiet.filter((r) => !taken.has(r.index)),
+      ...quiet.filter((r) => taken.has(r.index)),
+    ];
+    for (const room of order) {
+      this.survivor = this.windowIn(room, trap);
+      if (this.survivor) return;
+    }
+  }
+
+  /** Okno v stene úseku najbližšie k ceste (nie pri bráne ani pri vstupe), inak null. */
+  private windowIn(room: Room, trap: boolean): Survivor | null {
+    const out = room.doorOut !== null ? this.map.gates[room.doorOut]! : this.map.exit;
+    const goal = {
+      x: room.entry.x + (out.x - room.entry.x) * 0.55,
+      y: room.entry.y + (out.y - room.entry.y) * 0.55,
+    };
+    const gateTiles = this.map.gates.flatMap((g) => g.tiles);
+    const w = this.map.width;
+    let best: Survivor | null = null;
+    let bestD = Infinity;
+    const consider = (wx: number, wy: number, dx: number, dy: number) => {
+      if (tileAt(this.map, wx, wy) !== Tile.Building) return;
+      const ix = wx + dx;
+      const iy = wy + dy;
+      if (isSolid(this.map, ix, iy) || tileAt(this.map, ix, iy) === Tile.Track) return;
+      if (gateTiles.some((g) => Math.abs((g % w) - wx) + Math.abs(Math.floor(g / w) - wy) < 4))
+        return;
+      const x = (wx + 0.5) * TILE;
+      const y = (wy + 0.5) * TILE;
+      if (Math.hypot(x - room.entry.x, y - room.entry.y) < TILE * 4) return;
+      const d = Math.hypot(x - goal.x, y - goal.y);
+      if (d >= bestD) return;
+      bestD = d;
+      best = { room: room.index, x, y, dirX: dx, dirY: dy, trap, phase: 'waiting', t: 0 };
+    };
+    for (let x = room.x0; x <= room.x1; x++) {
+      consider(x, room.y0 - 1, 0, 1);
+      consider(x, room.y1 + 1, 0, -1);
+    }
+    for (let y = room.y0; y <= room.y1; y++) {
+      consider(room.x0 - 1, y, 1, 0);
+      consider(room.x1 + 1, y, -1, 0);
+    }
+    return best;
   }
 
   /** Výpadok prúdu: na 2. úrovni vždy, potom v zhruba 60 % úrovní, v tichom úseku. */
@@ -472,6 +563,7 @@ export class Game {
     }
     this.updateHorde(dt);
     this.updateAlarms(dt);
+    this.updateSurvivor(dt);
     this.updateZombies(dt);
     this.updateSpits(dt);
     this.updateGrenades(dt);
@@ -1013,6 +1105,7 @@ export class Game {
     }
     for (const alarm of this.alarms) this.events.push({ type: 'alarmEnd', tile: alarm.tile });
     this.alarms = [];
+    this.ambush.left = 0;
     this.hordeQueue = [];
     this.hordeRoom = -1;
     this.spits = [];
@@ -1269,6 +1362,59 @@ export class Game {
       z.aware = false;
       z.lure = { ...at };
       z.lureTime = 1;
+    }
+  }
+
+  /** Preživší volá, keď ho hráč počuje; pri okne hodí zásoby alebo spustí pascu. */
+  private updateSurvivor(dt: number): void {
+    const sv = this.survivor;
+    const front = this.survivorFront;
+    if (sv && front && (sv.phase === 'waiting' || sv.phase === 'calling')) {
+      const p = this.player;
+      const d = Math.hypot(p.x - front.x, p.y - front.y);
+      const hears = this.room === sv.room && d < SURVIVOR_HEAR && lineOfSight(this.map, front, p);
+      sv.t -= dt;
+      if (hears && sv.t <= 0) {
+        this.events.push({ type: 'survivorCall', x: sv.x, y: sv.y, first: sv.phase === 'waiting' });
+        sv.phase = 'calling';
+        sv.t = 3.2;
+      }
+      if (sv.phase === 'calling' && d < SURVIVOR_REACH && this.respawn <= 0) {
+        if (sv.trap) {
+          sv.phase = 'trap';
+          this.ambush = { left: 4 + Math.floor(this.level / 2), timer: 0.5 };
+          this.events.push({ type: 'survivorTrap', x: sv.x, y: sv.y });
+        } else {
+          sv.phase = 'gift';
+          // Zásoby dopadnú pred okno, k hráčovi.
+          const kinds: Pickup['kind'][] = ['health', 'ammo', this.rng() < 0.5 ? 'grenade' : 'cash'];
+          kinds.forEach((kind, i) => {
+            const side = (i - 1) * 12;
+            this.pickups.push({
+              id: this.nextId++,
+              kind,
+              value: kind === 'cash' ? 20 + this.level * 5 : undefined,
+              x: front.x + sv.dirX * 10 - sv.dirY * side,
+              y: front.y + sv.dirY * 10 + sv.dirX * side,
+              age: 0,
+              permanent: true,
+            });
+          });
+          this.events.push({ type: 'survivorGift', x: sv.x, y: sv.y });
+        }
+      }
+    }
+    // Pasca: zombie sa po jednej vyvaľujú z okna.
+    if (sv && front && this.ambush.left > 0) {
+      this.ambush.timer -= dt;
+      if (this.ambush.timer <= 0) {
+        this.ambush.timer = 0.35;
+        this.ambush.left--;
+        const kind: ZombieKind = this.level >= 2 && this.rng() < 0.4 ? 'runner' : 'walker';
+        const z = this.spawnZombie(kind, front.x, front.y, sv.room);
+        z.vx = sv.dirX * 90 + (this.rng() - 0.5) * 60;
+        z.vy = sv.dirY * 90 + (this.rng() - 0.5) * 60;
+      }
     }
   }
 

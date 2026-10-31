@@ -1334,6 +1334,47 @@ export function drawFlame(variant: number): PixelCanvas {
   return pc;
 }
 
+/**
+ * Okno s preživším (políčko steny, pohľad zhora, okno na strane +x): osvetlené sklo
+ * a človek vykláňajúci sa von, ktorý máva (dve fázy). `broken` = rozbité tmavé okno
+ * po pasci.
+ */
+export function drawWindow(frame: number, broken: boolean): PixelCanvas {
+  const pc = new PixelCanvas(T, T);
+  // Rám a parapet.
+  pc.fillRect(18, 3, 14, 26, 0x2a2622);
+  pc.fillRect(30, 2, 2, 28, 0x8a8478);
+  if (broken) {
+    pc.fillRect(20, 5, 10, 22, 0x140c0c);
+    // Črepy skla a krvavá šmuha cez parapet.
+    for (const [x, y] of [
+      [21, 6],
+      [22, 7],
+      [28, 6],
+      [27, 25],
+      [21, 24],
+      [29, 15],
+    ] as const)
+      pc.set(x, y, 0x8aa0b0);
+    for (let y = 11; y < 22; y++) pc.set(30 + (y % 2), y, y % 3 ? 0x7a1020 : 0x4e0912);
+    pc.outline(C.ink);
+    return pc;
+  }
+  // Teplé svetlo izby.
+  for (let y = 5; y < 27; y++)
+    for (let x = 20; x < 30; x++) pc.set(x, y, x > 25 ? 0xffd890 : x > 22 ? 0xf0b860 : 0xc88a40);
+  // Preživší: ramená v okne, hlava vyklonená von, mávajúce ruky.
+  ellipse(pc, 25, 16, 3.5, 6, 0x4a5a7a);
+  const wave = frame ? -3 : 3;
+  line(pc, 26, 11, 31, 6 + wave, 2, C.skin);
+  line(pc, 26, 21, 31, 26 - wave, 2, C.skin);
+  ellipse(pc, 28, 16, 3.4, 3.4, (nx, ny) =>
+    nx > 0.45 ? C.skin : nx * nx + ny * ny < 0.25 ? 0x6a4c36 : 0x4a3628,
+  );
+  pc.outline(C.ink);
+  return pc;
+}
+
 /** Mäkké kruhové svetlo (Canvas 2D gradient) pre tmu a teplý odlesk lámp. */
 export function lightCanvas(size: number, inner = 0.15): HTMLCanvasElement {
   const canvas = document.createElement('canvas');

@@ -66,6 +66,20 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
 - Tma: baterka, lampy (niektoré blikajú alebo nesvietia) a záblesky výstrelov.
 - Krv a mŕtvoly zostávajú na zemi.
 
+## Prekvapenia
+
+Mesto nie je len o hordách. V tichých úsekoch číhajú chvíle, ktoré prídu nečakane, ale vždy
+s férovým varovaním:
+
+- **Falošný mŕtvy** — nie každá mŕtvola pri ceste je mŕtva. Keď sa šklbne, radšej ju obíď
+  s baterkou na nej: kto sa jej otočí chrbtom, toho schmatne zozadu. Výstrel ju prebudí hneď.
+- **Výpadok prúdu** — lampy zablikajú a zhasnú, z tmy sa ozve krik, brány sa zabuchnú
+  a príde horda. Svieti len baterka, kým úsek nevyčistíš a prúd sa nevráti.
+- **Alarm auta** — zásah auta (výstrel, granát, sud) roztrúbi alarm: auto bliká, zbiehajú sa
+  zombie z okolia a idú k nemu. Dá sa to využiť aj ako návnada na odlákanie hordy.
+- **Preživší v okne** — osvetlené okno a niekto, kto volá o pomoc. Väčšinou ti hodí lekárničku
+  a náboje… ale niekedy je to pasca a z bytu za ním sa vyvalí skupina zombie.
+
 ## Vývoj
 
 `npm run typecheck && npm run lint && npm test` — logika hry (`src/game/`) je čistý TypeScript

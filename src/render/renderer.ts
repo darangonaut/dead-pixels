@@ -739,6 +739,7 @@ export class Renderer {
     };
     // Lampy (len tie vo výhľade); niektoré blikajú, niektoré nesvietia.
     const time = game.time;
+    const powered = game.lampsPower > 0.5;
     for (const lamp of this.lamps) {
       const visible =
         lamp.x > vx - 90 &&
@@ -746,8 +747,8 @@ export class Renderer {
         lamp.y > vy - 90 &&
         lamp.y < vy + this.viewH + 90;
       const flickerOn = !lamp.flicker || Math.sin(time * 23 + lamp.x) + Math.sin(time * 7.3) > -0.6;
-      lamp.glow.visible = lamp.on && flickerOn;
-      if (!visible || !lamp.on || !flickerOn) continue;
+      lamp.glow.visible = powered && lamp.on && flickerOn;
+      if (!visible || !lamp.glow.visible) continue;
       poly(lamp.poly, 0.55);
     }
     // Maják heliportu pulzuje.

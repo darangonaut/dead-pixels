@@ -320,6 +320,30 @@ export class Sound {
           this.tone('square', 250, 90, 0.5, 0.12);
           this.burst(0.3, 1400, 0.3, 2);
           break;
+        case 'powerFlicker':
+          // Bzučanie a praskanie preťaženého vedenia.
+          this.tone('square', 100, 96, 1.2, 0.05);
+          this.burst(0.08, 3000, 0.2, 2);
+          this.burst(0.06, 3000, 0.18, 2, 0.45);
+          this.burst(0.1, 3000, 0.22, 2, 0.9);
+          break;
+        case 'blackout':
+          // Zhasnutie: tupé cvaknutie a dobiehajúci hukot.
+          this.burst(0.25, 220, 0.6, 1);
+          this.tone('sine', 120, 30, 0.9, 0.35);
+          break;
+        case 'scream': {
+          // Vzdialený ľudský krik v tme.
+          const d = Math.hypot(e.x - listener.x, e.y - listener.y);
+          const vol = 0.22 * Math.max(0.35, 1 - d / 400);
+          this.tone('sawtooth', 880, 520, 1.1, vol);
+          this.tone('triangle', 1180, 640, 1.0, vol * 0.6);
+          break;
+        }
+        case 'powerBack':
+          this.tone('sine', 50, 110, 0.7, 0.2);
+          this.burst(0.08, 3000, 0.15, 2);
+          break;
         case 'grab':
           this.tone('square', 150, 60, 0.3, 0.2);
           this.burst(0.15, 600, 0.35, 2);

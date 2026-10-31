@@ -365,6 +365,8 @@ function react(events: GameEvent[], g: Game): void {
     if (e.type === 'died' && e.lives > 0) showBanner(t('died', { n: e.lives }), 1.6);
     if (e.type === 'room' && e.room === g.map.rooms.length - 1) showBanner(t('reachExit'), 2);
     if (e.type === 'boss') showBanner(t('boss'), 2);
+    if (e.type === 'blackout') showBanner(t('blackout'), 1.8);
+    if (e.type === 'powerBack') showToast(t('powerBack'));
     if (e.type === 'grab') {
       showToast(t('grabbed'));
       navigator.vibrate?.([60, 40, 60]);

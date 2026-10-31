@@ -66,6 +66,17 @@ export interface Zombie {
   lurker?: number;
 }
 
+/**
+ * Výpadok prúdu: v tichom úseku zablikajú a zhasnú všetky lampy, z tmy sa ozve krik
+ * a príde horda. Po jej vyčistení sa prúd vráti.
+ */
+export interface Outage {
+  room: number;
+  phase: 'armed' | 'flicker' | 'dark' | 'horde' | 'done';
+  /** Čas vo fáze (s). */
+  t: number;
+}
+
 /** Falošný mŕtvy: leží pri ceste ako mŕtvola a vstane, keď okolo neho hráč prejde. */
 export interface Lurker {
   room: number;
@@ -188,6 +199,10 @@ export type GameEvent =
   | { type: 'twitch'; x: number; y: number }
   | { type: 'lurkerRise'; x: number; y: number }
   | { type: 'grab'; x: number; y: number }
+  | { type: 'powerFlicker' }
+  | { type: 'blackout' }
+  | { type: 'scream'; x: number; y: number }
+  | { type: 'powerBack' }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
@@ -212,6 +227,10 @@ const EXPLOSION_RADIUS = 44;
 const LURKER_REACH = 30;
 const LURKER_CLOSE = 16;
 const LURKER_RISE = 0.5;
+/** Výpadok: blikanie (s), potom tma, krik a horda (časy od začiatku tmy). */
+const OUTAGE_FLICKER = 1.2;
+const OUTAGE_SCREAM = 1.4;
+const OUTAGE_HORDE = 3;
 const SPIT_SPEED = 110;
 
 /** Zloženie hordy v úseku podľa úrovne. */
@@ -275,6 +294,7 @@ export class Game {
   /** Náhoda pre prekvapenia (oddelená, aby nemenila mapu ani priebeh boja). */
   private readonly surprise: () => number;
   readonly lurkers: Lurker[] = [];
+  outage: Outage | null = null;
 
   constructor(seed: number, level = 1, carry?: Carry) {
     this.level = level;
@@ -317,6 +337,25 @@ export class Game {
     this.flow.update(this.player.x, this.player.y);
     this.surprise = createRng(seed ^ 0x5eed ^ Math.imul(level, 7919));
     this.planLurkers();
+    this.planOutage();
+  }
+
+  /** Výpadok prúdu: na 2. úrovni vždy, potom v zhruba 60 % úrovní, v tichom úseku. */
+  private planOutage(): void {
+    if (this.level < 2 || (this.level !== 2 && this.surprise() >= 0.6)) return;
+    const taken = new Set(this.lurkers.map((l) => l.room));
+    const rooms = this.quietRooms().filter((r) => !taken.has(r.index));
+    if (rooms.length === 0) return;
+    const room = rooms[Math.floor(this.surprise() * rooms.length)]!;
+    this.outage = { room: room.index, phase: 'armed', t: 0 };
+  }
+
+  /** Sila lámp 0–1 (pri výpadku blikajú, potom zhasnú). */
+  get lampsPower(): number {
+    const o = this.outage;
+    if (!o || o.phase === 'armed' || o.phase === 'done') return 1;
+    if (o.phase === 'flicker') return Math.sin(o.t * 37) + Math.sin(o.t * 13) > 0.3 ? 1 : 0;
+    return 0;
   }
 
   /** Úseky bez udalosti (pokoj, túlavé zombie) — miesto pre prekvapenia. */
@@ -402,6 +441,7 @@ export class Game {
     this.hash.rebuild(this.zombies);
     this.updatePlayer(dt, input);
     this.updateRoom();
+    this.updateOutage(dt);
     this.flowTimer -= dt;
     if (this.flowTimer <= 0) {
       this.flowTimer = 0.2;
@@ -749,9 +789,7 @@ export class Game {
         room.encounter === 'boss'
           ? { walker: 4 + this.level, runner: 2, brute: 0, exploder: 1, spitter: 0, boss: 0 }
           : hordeComposition(this.level);
-      this.hordeQueue = [];
-      for (const kind of ['walker', 'runner', 'brute', 'exploder', 'spitter'] as const)
-        for (let i = 0; i < comp[kind]; i++) this.hordeQueue.push(kind);
+      this.fillHorde(comp);
       if (room.encounter === 'boss') {
         const at = this.spawnPoint(room) ?? {
           x: (room.x0 + room.x1) * 8,
@@ -760,14 +798,63 @@ export class Game {
         this.spawnZombie('boss', at.x, at.y, room.index).aware = true;
         this.events.push({ type: 'boss', room: room.index });
       }
-      for (let i = this.hordeQueue.length - 1; i > 0; i--) {
-        const j = Math.floor(this.rng() * (i + 1));
-        [this.hordeQueue[i], this.hordeQueue[j]] = [this.hordeQueue[j]!, this.hordeQueue[i]!];
-      }
       this.hordeRoom = room.index;
       this.spawnTimer = 1;
       if (room.encounter === 'horde') this.events.push({ type: 'horde', room: room.index });
     }
+  }
+
+  /** Front hordy podľa zloženia, v náhodnom poradí. */
+  private fillHorde(comp: Record<ZombieKind, number>): void {
+    this.hordeQueue = [];
+    for (const kind of ['walker', 'runner', 'brute', 'exploder', 'spitter'] as const)
+      for (let i = 0; i < comp[kind]; i++) this.hordeQueue.push(kind);
+    for (let i = this.hordeQueue.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rng() * (i + 1));
+      [this.hordeQueue[i], this.hordeQueue[j]] = [this.hordeQueue[j]!, this.hordeQueue[i]!];
+    }
+  }
+
+  /** Výpadok prúdu: spustí sa uprostred úseku, potom blikanie → tma → krik → horda. */
+  private updateOutage(dt: number): void {
+    const o = this.outage;
+    if (!o || o.phase === 'done' || o.phase === 'horde') return;
+    const room = this.map.rooms[o.room]!;
+    if (o.phase === 'armed') {
+      const p = this.player;
+      if (this.room !== o.room) return;
+      if (Math.hypot(p.x - room.entry.x, p.y - room.entry.y) < TILE * 5) return;
+      o.phase = 'flicker';
+      o.t = 0;
+      this.events.push({ type: 'powerFlicker' });
+      return;
+    }
+    const before = o.t;
+    o.t += dt;
+    if (o.phase === 'flicker') {
+      if (o.t < OUTAGE_FLICKER) return;
+      o.phase = 'dark';
+      o.t = 0;
+      this.events.push({ type: 'blackout' });
+      return;
+    }
+    // Tma: krik z hlbín úseku, potom horda (brány sa zabuchnú).
+    if (before < OUTAGE_SCREAM && o.t >= OUTAGE_SCREAM) {
+      const at = this.spawnPoint(room) ?? room.entry;
+      this.events.push({ type: 'scream', x: at.x, y: at.y });
+    }
+    if (o.t < OUTAGE_HORDE) return;
+    o.phase = 'horde';
+    if (room.doorIn !== null) this.setGate(room.doorIn, false);
+    if (room.doorOut !== null) this.setGate(room.doorOut, false);
+    const full = hordeComposition(this.level);
+    const comp = { ...full };
+    for (const kind of Object.keys(comp) as ZombieKind[]) comp[kind] = Math.floor(full[kind] * 0.6);
+    comp.walker = Math.max(4, comp.walker);
+    this.fillHorde(comp);
+    this.hordeRoom = o.room;
+    this.spawnTimer = 0.6;
+    this.events.push({ type: 'horde', room: o.room });
   }
 
   private setGate(id: number, open: boolean): void {
@@ -794,6 +881,10 @@ export class Game {
     // Úsek vyčistený: brány sa otvoria a v strede zostane odmena.
     this.cleared.add(room.index);
     this.hordeRoom = -1;
+    if (this.outage?.room === room.index && this.outage.phase === 'horde') {
+      this.outage.phase = 'done';
+      this.events.push({ type: 'powerBack' });
+    }
     if (room.doorIn !== null) this.setGate(room.doorIn, true);
     if (room.doorOut !== null) this.setGate(room.doorOut, true);
     const cx = ((room.x0 + room.x1 + 1) / 2) * TILE;
@@ -882,6 +973,15 @@ export class Game {
           if (r.doorOut !== null) this.setGate(r.doorOut, false);
         }
       }
+    // Výpadok v úseku za kontrolným bodom začne odznova (svetlá späť, brány otvorené).
+    const o = this.outage;
+    if (o && o.room >= this.checkpoint && o.phase !== 'armed' && o.phase !== 'done') {
+      o.phase = 'armed';
+      o.t = 0;
+      const room = this.map.rooms[o.room]!;
+      if (room.doorIn !== null) this.setGate(room.doorIn, true);
+      if (room.doorOut !== null) this.setGate(room.doorOut, true);
+    }
     this.hordeQueue = [];
     this.hordeRoom = -1;
     this.spits = [];

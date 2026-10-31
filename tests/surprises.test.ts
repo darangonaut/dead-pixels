@@ -88,3 +88,51 @@ describe('falošný mŕtvy', () => {
     expect(z.state).toBe('normal');
   });
 });
+
+describe('výpadok prúdu', () => {
+  it('na 2. úrovni vždy, nie v úseku s falošným mŕtvym', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const g = new Game(seed, 2);
+      expect(g.outage).not.toBeNull();
+      expect(g.lurkers.some((l) => l.room === g.outage!.room)).toBe(false);
+    }
+    expect(new Game(1, 1).outage).toBeNull();
+  });
+
+  it('lampy zablikajú a zhasnú, ozve sa krik, brány sa zavrú a príde horda; po nej sa prúd vráti', () => {
+    const game = findGame(2, (g) => g.outage !== null);
+    const o = game.outage!;
+    const room = game.map.rooms[o.room]!;
+    const p = game.player;
+    p.hp = 1e6;
+    p.x = room.entry.x;
+    p.y = room.entry.y;
+    game.room = o.room - 1;
+    run(game, 0.1);
+    expect(game.lampsPower).toBe(1);
+    // Hráč prejde do stredu úseku.
+    p.x = ((room.x0 + room.x1 + 1) / 2) * 16;
+    p.y = ((room.y0 + room.y1 + 1) / 2) * 16;
+    const events = run(game, 5);
+    const types = events.map((e) => e.type);
+    expect(types).toContain('powerFlicker');
+    expect(types).toContain('blackout');
+    expect(types).toContain('scream');
+    expect(types).toContain('horde');
+    expect(types.indexOf('blackout')).toBeLessThan(types.indexOf('scream'));
+    expect(game.lampsPower).toBe(0);
+    expect(game.map.gates[room.doorIn!]!.open).toBe(false);
+    expect(game.hordeRemaining).toBeGreaterThan(0);
+    // Horda zmizne (akoby ju hráč postrieľal): prúd sa vráti a brány sa otvoria.
+    const after: GameEvent[] = [];
+    for (let t = 0; t < 30 && game.outage!.phase !== 'done'; t += 1 / 60) {
+      game.zombies = [];
+      game.update(1 / 60, idle);
+      after.push(...game.takeEvents());
+    }
+    expect(after.some((e) => e.type === 'powerBack')).toBe(true);
+    expect(game.lampsPower).toBe(1);
+    expect(game.map.gates[room.doorIn!]!.open).toBe(true);
+    expect(game.map.gates[room.doorOut!]!.open).toBe(true);
+  });
+});

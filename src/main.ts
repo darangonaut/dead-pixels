@@ -312,6 +312,7 @@ $('.to-menu').addEventListener('click', () => {
   host.innerHTML = '';
   hud.hidden = true;
   showTouchButtons(false);
+  $('#lowhp').classList.remove('on');
   start.hidden = false;
   title.start();
   renderTexts();
@@ -487,11 +488,17 @@ function react(events: GameEvent[], g: Game): void {
 const STEP = 1 / 60;
 let acc = 0;
 let last = performance.now();
+let heartbeat = 0;
+const lowHp = $('#lowhp');
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (game && renderer && paused) renderer.render(0);
-  else if (game && renderer) {
+  else if (game && renderer && renderer.freeze > 0) {
+    // Zastavenie pri silnom zásahu: svet na okamih zamrzne.
+    renderer.freeze -= dt;
+    renderer.render(0);
+  } else if (game && renderer) {
     acc += dt;
     const r = renderer;
     while (acc >= STEP) {
@@ -508,6 +515,13 @@ function frame(now: number): void {
     r.render(dt);
     sound.setIntensity(game.boss ? 2 : game.hordeRemaining !== null ? 1 : 0);
     updateHud(game);
+    // Málo zdravia: okraje obrazovky pulzujú a bije srdce.
+    const low = game.player.hp > 0 && game.player.hp < game.maxHp * 0.3 && game.respawn <= 0;
+    lowHp.classList.toggle('on', low);
+    if (low && (heartbeat -= dt) <= 0) {
+      heartbeat = 0.5 + (game.player.hp / game.maxHp) * 2;
+      sound.heartbeat();
+    }
   }
   if (bannerTimer > 0 && (bannerTimer -= dt) <= 0) banner.classList.remove('show');
   if (toastTimer > 0 && (toastTimer -= dt) <= 0) toast.classList.remove('show');

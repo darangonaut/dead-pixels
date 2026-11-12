@@ -27,7 +27,11 @@ import {
   PX,
   drawBlood,
   drawCorpse,
+  drawCrawler,
   drawDot,
+  drawGib,
+  drawLimb,
+  drawSilhouette,
   drawArrow,
   drawBarrel,
   drawFlame,
@@ -82,6 +86,8 @@ interface Particle {
   /** Po dopade zostane na zemi (krv, nábojnica). */
   stain: boolean;
   friction: number;
+  /** Otáčanie za letu (rad/s). */
+  spin: number;
 }
 
 interface Flash {
@@ -150,7 +156,18 @@ export class Renderer {
     spit: Texture.EMPTY,
     acid: Texture.EMPTY,
     scorch: Texture.EMPTY,
+    /** Biele siluety zombie (bliknutie pri zásahu). */
+    white: new Map<string, Texture>(),
+    crawler: new Map<string, Texture>(),
+    limb: [] as Texture[],
+    gib: [] as Texture[],
   };
+  /** Zombie práve zasiahnuté (id → zostávajúci čas bliknutia). */
+  private hitFlash = new Map<number, number>();
+  /** Zastavenie hry pri silnom zásahu (s) — slučka v main.ts počas neho nesimuluje. */
+  freeze = 0;
+  /** Spätný ráz kamery pri výstrele (px). */
+  private kick = { x: 0, y: 0 };
   private zombieSprites = new Map<number, Sprite>();
   private pickupSprites = new Map<number, Sprite>();
   private player = new Sprite();
@@ -200,8 +217,20 @@ export class Renderer {
     this.tex.blood = Array.from({ length: 6 }, (_, i) => texture(drawBlood(i)));
     for (const kind of ['walker', 'runner', 'brute', 'exploder', 'spitter', 'boss'] as const) {
       this.tex.corpse.set(kind, texture(drawCorpse(kind)));
-      for (const f of [0, 1]) this.tex.zombie.set(`${kind}${f}`, texture(drawZombie(kind, f)));
+      for (const f of [0, 1]) {
+        const pc = drawZombie(kind, f);
+        this.tex.zombie.set(`${kind}${f}`, texture(pc));
+        this.tex.white.set(`${kind}${f}`, texture(drawSilhouette(pc)));
+      }
     }
+    for (const kind of ['walker', 'runner'] as const)
+      for (const f of [0, 1]) {
+        const pc = drawCrawler(kind, f);
+        this.tex.crawler.set(`${kind}${f}`, texture(pc));
+        this.tex.white.set(`crawl${kind}${f}`, texture(drawSilhouette(pc)));
+      }
+    this.tex.limb = [0, 1].map((v) => texture(drawLimb(v)));
+    this.tex.gib = [0, 1, 2].map((v) => texture(drawGib(v)));
     for (const w of WEAPON_ORDER)
       for (const f of [0, 1]) this.tex.player.set(`${w}${f}`, texture(drawPlayer(f, w)));
     this.tex.drop = texture(drawDot(C.blood));
@@ -385,6 +414,10 @@ export class Renderer {
           for (const hit of e.hits)
             this.tracers.push({ x1: e.x, y1: e.y, x2: hit.x, y2: hit.y, age: 0 });
           this.shake = Math.max(this.shake, big ? 3 : e.weapon === 'smg' ? 0.8 : 1.2);
+          // Spätný ráz: kamera trhne proti smeru výstrelu.
+          const recoil = big ? 5 : e.weapon === 'smg' ? 1.2 : 2;
+          this.kick.x -= Math.cos(e.angle) * recoil;
+          this.kick.y -= Math.sin(e.angle) * recoil;
           // Nábojnica vyletí doprava od zbrane.
           const side = e.angle + Math.PI / 2;
           this.particle(
@@ -413,6 +446,29 @@ export class Renderer {
         }
         case 'hit':
           this.splatter(e.x, e.y, e.angle, 4, false);
+          this.hitFlash.set(e.id, 0.06);
+          break;
+        case 'dismember':
+          // Nohy odletia, zombie sa plazí ďalej.
+          this.hitFlash.set(e.id, 0.08);
+          this.shake = Math.max(this.shake, 2);
+          this.freeze = Math.max(this.freeze, 0.04);
+          this.splatter(e.x, e.y, e.angle, 12, true);
+          for (let i = 0; i < 2; i++) {
+            const a = e.angle + (i ? 0.7 : -0.7) + (Math.random() - 0.5) * 0.5;
+            const sp = 70 + Math.random() * 60;
+            this.particle(
+              this.tex.limb[i]!,
+              e.x,
+              e.y,
+              Math.cos(a) * sp,
+              Math.sin(a) * sp,
+              0.45,
+              true,
+              6,
+              (Math.random() - 0.5) * 30,
+            );
+          }
           break;
         case 'noise':
           this.rings.push({ x: e.x, y: e.y, r: e.radius, age: 0 });
@@ -423,6 +479,7 @@ export class Renderer {
           break;
         case 'takedown':
           this.shake = Math.max(this.shake, 2);
+          this.freeze = Math.max(this.freeze, 0.06);
           break;
         case 'focus':
           this.flashes.push({
@@ -436,6 +493,7 @@ export class Renderer {
         case 'explode': {
           this.flashes.push({ x: e.x, y: e.y, size: 180, age: 0, life: 0.25 });
           this.shake = Math.max(this.shake, 5);
+          this.freeze = Math.max(this.freeze, 0.05);
           this.stampDecal(this.tex.scorch, e.x, e.y, Math.random() * Math.PI * 2, 0.9);
           for (let i = 0; i < 24; i++) {
             const a = Math.random() * Math.PI * 2;
@@ -519,19 +577,48 @@ export class Renderer {
         case 'grab':
           this.shake = Math.max(this.shake, 4);
           break;
-        case 'kill':
+        case 'kill': {
           this.splatter(e.x, e.y, e.angle, 10, true);
-          this.stampDecal(
+          // Mŕtvola odkĺzne v smere zásahu a až potom zostane na zemi.
+          const heavy = e.kind === 'brute' || e.kind === 'boss';
+          const slide = heavy ? 30 : 75 + Math.random() * 30;
+          this.particle(
             this.tex.corpse.get(e.kind)!,
-            e.x + Math.cos(e.angle) * 3,
-            e.y + Math.sin(e.angle) * 3,
+            e.x,
+            e.y,
+            Math.cos(e.angle) * slide,
+            Math.sin(e.angle) * slide,
+            0.3,
+            true,
+            9,
+            0,
             e.angle,
           );
+          // Kúsky mäsa.
+          for (let i = 0; i < (heavy ? 6 : 3); i++) {
+            const a = e.angle + (Math.random() - 0.5) * 1.6;
+            const sp = 50 + Math.random() * 90;
+            this.particle(
+              this.tex.gib[i % 3]!,
+              e.x,
+              e.y,
+              Math.cos(a) * sp,
+              Math.sin(a) * sp,
+              0.35,
+              true,
+              6,
+              (Math.random() - 0.5) * 20,
+            );
+          }
+          if (e.kind === 'boss') this.freeze = Math.max(this.freeze, 0.35);
+          else if (e.kind === 'brute') this.freeze = Math.max(this.freeze, 0.07);
           break;
+        }
         case 'respawn':
           this.cam = { x: this.game.player.x, y: this.game.player.y };
           break;
         case 'hurt':
+          this.freeze = Math.max(this.freeze, 0.03);
           this.hurtFlash = 0.25;
           this.shake = Math.max(this.shake, 2.5);
           this.splatter(e.x, e.y, Math.random() * Math.PI * 2, 3, false);
@@ -567,13 +654,16 @@ export class Renderer {
     life: number,
     stain: boolean,
     friction: number,
+    spin = 0,
+    rotation = 0,
   ): void {
     if (this.particles.length > 600) return;
     const sprite = new Sprite(tex);
     sprite.anchor.set(0.5);
     sprite.position.set(x, y);
+    sprite.rotation = rotation;
     this.effects.addChild(sprite);
-    this.particles.push({ sprite, vx, vy, life, age: 0, stain, friction });
+    this.particles.push({ sprite, vx, vy, life, age: 0, stain, friction, spin });
   }
 
   /** Trvalá stopa na zemi (krv, mŕtvola, nábojnica). */
@@ -594,14 +684,17 @@ export class Renderer {
     this.updateParticles(dt);
 
     // Kamera: hráč s výhľadom v smere mierenia, otrasy pri streľbe.
-    const lookX = p.x + Math.cos(p.angle) * 26;
-    const lookY = p.y + Math.sin(p.angle) * 26;
+    const lookX = p.x + Math.cos(p.angle) * 32;
+    const lookY = p.y + Math.sin(p.angle) * 32;
     const k = 1 - Math.exp(-8 * dt);
     this.cam.x += (lookX - this.cam.x) * k;
     this.cam.y += (lookY - this.cam.y) * k;
     this.shake = Math.max(0, this.shake - dt * 12);
-    const sx = (Math.random() - 0.5) * this.shake;
-    const sy = (Math.random() - 0.5) * this.shake;
+    const back = Math.exp(-14 * dt);
+    this.kick.x *= back;
+    this.kick.y *= back;
+    const sx = (Math.random() - 0.5) * this.shake + this.kick.x;
+    const sy = (Math.random() - 0.5) * this.shake + this.kick.y;
     const w = this.app.screen.width;
     const h = this.app.screen.height;
     // Zarovnanie na fyzické pixely (ostré pixely aj pri neceločíselnom devicePixelRatio).
@@ -724,6 +817,9 @@ export class Renderer {
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
     this.player.tint = this.hurtFlash > 0 ? 0xff6060 : 0xffffff;
 
+    for (const [id, t] of this.hitFlash)
+      if (t - dt <= 0) this.hitFlash.delete(id);
+      else this.hitFlash.set(id, t - dt);
     const alive = new Set<number>();
     for (const z of game.zombies) {
       alive.add(z.id);
@@ -734,7 +830,15 @@ export class Renderer {
         this.actors.addChildAt(sprite, 0);
         this.zombieSprites.set(z.id, sprite);
       }
-      sprite.texture = this.tex.zombie.get(`${z.kind}${Math.floor(z.step) % 2}`)!;
+      const frame = Math.floor(z.step) % 2;
+      const flash = (this.hitFlash.get(z.id) ?? 0) > 0;
+      const crawler = z.crawl && (z.kind === 'walker' || z.kind === 'runner');
+      const key = crawler ? `crawl${z.kind}${frame}` : `${z.kind}${frame}`;
+      sprite.texture = flash
+        ? this.tex.white.get(key)!
+        : crawler
+          ? this.tex.crawler.get(`${z.kind}${frame}`)!
+          : this.tex.zombie.get(key)!;
       sprite.position.set(Math.round(z.x), Math.round(z.y));
       sprite.rotation = z.angle + (z.stagger > 0 ? 0.3 : 0);
       sprite.scale.set(1);
@@ -810,8 +914,11 @@ export class Renderer {
       q.vy *= f;
       q.sprite.x += q.vx * dt;
       q.sprite.y += q.vy * dt;
+      q.spin *= f;
+      q.sprite.rotation += q.spin * dt;
       if (q.age >= q.life) {
-        if (q.stain) this.stampDecal(q.sprite.texture, q.sprite.x, q.sprite.y, 0, 0.9);
+        if (q.stain)
+          this.stampDecal(q.sprite.texture, q.sprite.x, q.sprite.y, q.sprite.rotation, 0.9);
         q.sprite.destroy();
         this.particles.splice(i, 1);
       }

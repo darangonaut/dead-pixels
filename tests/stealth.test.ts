@@ -266,3 +266,47 @@ describe('ukladanie', () => {
     expect(game.player.ammo.crowbar).toBe(Infinity);
   });
 });
+
+describe('plaziace sa zombie', () => {
+  it('silný zásah občas odtrhne nohy: zombie sa plazí pomalšie a ďalší zásah ju dorazí', () => {
+    const { game, a } = openGame(60, 3);
+    const p = game.player;
+    p.hp = 1e6;
+    p.owned.push('shotgun');
+    p.ammo.shotgun = 999;
+    p.weapon = 'shotgun';
+    let crawler = null;
+    for (let i = 0; i < 80 && !crawler; i++) {
+      const pos = at(game, a, 40);
+      const z = game.spawnZombie('walker', pos.x, pos.y);
+      z.hp = 0.5;
+      p.cooldown = 0;
+      const events = step(game, { ...idle, aim: a, firing: true });
+      if (events.some((e) => e.type === 'dismember')) crawler = z;
+      else game.zombies = game.zombies.filter((o) => o !== z);
+    }
+    expect(crawler).not.toBeNull();
+    const z = crawler!;
+    expect(z.crawl).toBe(true);
+    expect(game.zombies.includes(z)).toBe(true);
+    // Plazí sa pomalšie ako chodec.
+    const walker = game.spawnZombie('walker', z.x, z.y + 1);
+    game.zombies = [z, walker];
+    const d0 = Math.hypot(z.x - p.x, z.y - p.y);
+    const w0 = Math.hypot(walker.x - p.x, walker.y - p.y);
+    step(game, idle, 0.6);
+    expect(d0 - Math.hypot(z.x - p.x, z.y - p.y)).toBeLessThan(
+      w0 - Math.hypot(walker.x - p.x, walker.y - p.y),
+    );
+    // Pištoľ ju dorazí.
+    game.zombies = game.zombies.filter((o) => o !== walker);
+    p.weapon = 'pistol';
+    p.cooldown = 0;
+    const kills = game.kills;
+    const aim = Math.atan2(z.y - p.y, z.x - p.x);
+    for (let i = 0; i < 30 && game.zombies.includes(z); i++)
+      step(game, { ...idle, aim, firing: true }, 0.25);
+    expect(game.zombies.includes(z)).toBe(false);
+    expect(game.kills).toBeGreaterThan(kills);
+  });
+});

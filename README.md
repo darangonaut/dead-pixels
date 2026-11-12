@@ -67,7 +67,11 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
   aj ostatné zombie), pľujúce (držia si odstup a pľujú kyselinu) a boss Mäsiar na 5. a 10. úrovni
   (rozbehne sa za hráčom; keď narazí do steny, je omráčený).
 - Tma: baterka, lampy (niektoré blikajú alebo nesvietia) a záblesky výstrelov.
-- Krv a mŕtvoly zostávajú na zemi.
+- Krv a mŕtvoly zostávajú na zemi. Mŕtvola po zásahu odkĺzne, kúsky odletia.
+- Pocit zo zásahov: zasiahnutá zombie blikne nabielo, kamera trhne pri spätnom ráze,
+  pri zabití obra, bossa, výbuchu či tichom zneškodnení svet na okamih zamrzne. Silný
+  zásah občas chodcovi alebo bežcovi odtrhne nohy — plazí sa ďalej, pomaly, ale stále hryzie.
+- Pri nízkom zdraví pulzujú okraje obrazovky a bije srdce.
 
 ## Ticho a tma
 

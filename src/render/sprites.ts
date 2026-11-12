@@ -1429,3 +1429,64 @@ export function lightCanvas(size: number, inner = 0.15): HTMLCanvasElement {
   ctx.fillRect(0, 0, size, size);
   return canvas;
 }
+
+// --- Šťava: zásahy, končatiny, plazenie ---
+
+/** Biela silueta spritu (bliknutie pri zásahu). */
+export function drawSilhouette(src: PixelCanvas): PixelCanvas {
+  const pc = new PixelCanvas(src.width, src.height);
+  for (let y = 0; y < src.height; y++)
+    for (let x = 0; x < src.width; x++) if (src.get(x, y) !== null) pc.set(x, y, 0xffffff);
+  return pc;
+}
+
+/**
+ * Zombie bez nôh: z postavy zostane predná polovica (hlava, ramená, ruky), vzadu
+ * roztrhnutý trup a krvavá stopa. Ruky sa striedavo naťahujú dopredu.
+ */
+export function drawCrawler(kind: 'walker' | 'runner', frame: number): PixelCanvas {
+  const src = drawZombie(kind, frame);
+  const pc = new PixelCanvas(src.width, src.height);
+  const cut = Math.round(src.width * 0.26);
+  const reach = frame ? 2 : 0;
+  for (let y = 0; y < src.height; y++)
+    for (let x = cut; x < src.width; x++) {
+      const c = src.get(x, y);
+      if (c === null) continue;
+      // Horná / dolná ruka sa posúva dopredu podľa snímky.
+      const upper = y < src.height / 2;
+      const dx = upper === (frame === 1) ? reach : 0;
+      if (x + dx < src.width) pc.set(x + dx, y, x < cut + 2 ? C.bloodDark : c);
+    }
+  // Roztrhnutý koniec trupu a krvavá stopa za ním.
+  const cy = Math.round(src.height / 2);
+  for (let y = cy - 5; y <= cy + 5; y++) {
+    pc.set(cut - 1, y, C.blood);
+    if (Math.abs(y - cy) < 4) pc.set(cut - 2, y, C.bloodDark);
+  }
+  for (let x = cut - 8; x < cut - 2; x++)
+    if ((x + frame) % 3 !== 0) pc.set(x, cy + ((x * 7) % 3) - 1, C.blood, 200);
+  return pc;
+}
+
+/** Odtrhnutá končatina (letí vzduchom, potom zostane na zemi). */
+export function drawLimb(variant: number): PixelCanvas {
+  const pc = new PixelCanvas(14, 6);
+  const skin = variant % 2 ? 0x7a8a5a : 0x6a7a4a;
+  pc.fillRect(1, 2, 9, 3, variant % 2 ? 0x4a4436 : skin); // rukáv / noha
+  pc.fillRect(1, 2, 9, 1, shade(skin, 1.2));
+  pc.fillRect(9, 1, 3, 4, skin); // dlaň / chodidlo
+  pc.set(12, 2, shade(skin, 0.8));
+  pc.fillRect(0, 2, 2, 3, C.blood);
+  pc.set(0, 3, C.bloodDark);
+  return pc;
+}
+
+/** Kúsok mäsa (pri výbuchu a zásahu brokovnicou). */
+export function drawGib(variant: number): PixelCanvas {
+  const pc = new PixelCanvas(6, 6);
+  ellipse(pc, 2.5 + (variant % 2) * 0.5, 2.5, 2.2, 1.6 + (variant % 3) * 0.3, (nx, ny) =>
+    nx + ny < -0.4 ? C.bloodLight : nx + ny > 0.6 ? C.bloodDark : C.blood,
+  );
+  return pc;
+}

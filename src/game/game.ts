@@ -72,6 +72,8 @@ export interface Zombie {
   lureTime: number;
   /** Oslepená sústredeným lúčom baterky (s) — stojí a neútočí. */
   blind: number;
+  /** Prišla o nohy: plazí sa pomaly za hráčom. */
+  crawl: boolean;
 }
 
 /** Spustený alarm auta: húka, bliká a láka zombie z okolia. */
@@ -230,7 +232,8 @@ export interface Input {
 
 export type GameEvent =
   | { type: 'shot'; weapon: WeaponId; x: number; y: number; angle: number; hits: Vec[] }
-  | { type: 'hit'; x: number; y: number; angle: number; kind: ZombieKind }
+  | { type: 'hit'; id: number; x: number; y: number; angle: number; kind: ZombieKind }
+  | { type: 'dismember'; id: number; x: number; y: number; angle: number; kind: ZombieKind }
   | { type: 'kill'; x: number; y: number; angle: number; kind: ZombieKind }
   | { type: 'hurt'; x: number; y: number }
   | { type: 'pickup'; kind: Pickup['kind']; weapon?: WeaponId }
@@ -381,6 +384,8 @@ export class Game {
   private readonly nearby: Zombie[] = [];
   /** Samostatný zoznam pre hluk (volá sa aj počas prechodu `nearby`). */
   private readonly heard: Zombie[] = [];
+  /** Zombie, ktorým aktuálny výstrel odtrhol nohy (ďalšie broky ich minú). */
+  private readonly maimed = new Set<Zombie>();
   private flowTimer = 0;
   private groanTimer = 2;
   /** Náhoda pre prekvapenia (oddelená, aby nemenila mapu ani priebeh boja). */
@@ -787,6 +792,7 @@ export class Game {
     }
     const muzzle = { x: p.x + Math.cos(p.angle) * 7, y: p.y + Math.sin(p.angle) * 7 };
     const hits: Vec[] = [];
+    this.maimed.clear();
     for (let i = 0; i < weapon.pellets; i++) {
       const angle = p.angle + (this.rng() - 0.5) * weapon.spread;
       hits.push(
@@ -864,7 +870,7 @@ export class Game {
       z.vx += Math.cos(angle) * def.knockback * 20 * resist;
       z.vy += Math.sin(angle) * def.knockback * 20 * resist;
       if (z.hp <= 0) this.killZombie(z, angle);
-      else this.events.push({ type: 'hit', x: z.x, y: z.y, angle, kind: z.kind });
+      else this.events.push({ type: 'hit', id: z.id, x: z.x, y: z.y, angle, kind: z.kind });
     }
     this.events.push({
       type: 'swing',
@@ -973,7 +979,7 @@ export class Game {
       wall / 2 + 10,
       this.nearby,
     )) {
-      if (z.hp <= 0) continue; // už zabitá iným brokom
+      if (z.hp <= 0 || this.maimed.has(z)) continue; // už zabitá / zmrzačená iným brokom
       const r = ZOMBIES[z.kind].radius + 1;
       // Priesečník lúča s kruhom.
       const ox = z.x - from.x;
@@ -994,11 +1000,37 @@ export class Game {
       best.vx += dx * knockback * 20 * resist;
       best.vy += dy * knockback * 20 * resist;
       if (best.kind === 'boss') best.stagger = 0;
-      if (best.hp <= 0) this.killZombie(best, angle);
-      else this.events.push({ type: 'hit', x: best.x, y: best.y, angle, kind: best.kind });
+      if (best.hp <= 0 && this.dismember(best, angle, knockback)) {
+        // Prežila bez nôh — plazí sa ďalej.
+      } else if (best.hp <= 0) this.killZombie(best, angle);
+      else
+        this.events.push({
+          type: 'hit',
+          id: best.id,
+          x: best.x,
+          y: best.y,
+          angle,
+          kind: best.kind,
+        });
     } else if (barrelHit) this.destroyBarrel(hx, hy);
     else if (wall < range) this.triggerAlarm(hx, hy);
     return { x: from.x + dx * bestT, y: from.y + dy * bestT };
+  }
+
+  /**
+   * Silný zásah strelou občas odtrhne chodcovi alebo bežcovi nohy: namiesto smrti sa plazí
+   * ďalej (pomaly, so zvyškom života). Brokovnica častejšie.
+   */
+  private dismember(z: Zombie, angle: number, knockback: number): boolean {
+    if (z.crawl || (z.kind !== 'walker' && z.kind !== 'runner') || !z.aware) return false;
+    if (this.rng() >= (knockback >= 5 ? 0.3 : 0.12)) return false;
+    z.crawl = true;
+    z.hp = 1;
+    this.maimed.add(z);
+    z.stagger = 0.4;
+    z.burn = 0;
+    this.events.push({ type: 'dismember', id: z.id, x: z.x, y: z.y, angle, kind: z.kind });
+    return true;
   }
 
   private killZombie(z: Zombie, angle: number): void {
@@ -1277,6 +1309,7 @@ export class Game {
       lure: null,
       lureTime: 0,
       blind: 0,
+      crawl: false,
     };
     if (kind === 'boss') z.hp = ZOMBIES.boss.hp + this.level * 12;
     z.maxHp = z.hp;
@@ -1487,6 +1520,7 @@ export class Game {
           ay += (oy / d) * (min - d) * 0.25;
         }
       }
+      if (z.crawl) speed *= 0.35;
       if (z.stagger > 0) speed *= 0.2;
       z.stagger = Math.max(0, z.stagger - dt);
       z.vx *= Math.exp(-10 * dt);
@@ -1506,7 +1540,7 @@ export class Game {
         z.cooldown = 0.8;
         z.aware = true;
         if (p.hurt === 0) {
-          this.damagePlayer(def.damage);
+          this.damagePlayer(z.crawl ? Math.ceil(def.damage * 0.6) : def.damage);
           if (this.respawn > 0 || this.over) return;
         }
       }

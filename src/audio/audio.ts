@@ -262,6 +262,13 @@ export class Sound {
     wind.start();
   }
 
+  /** Tlkot srdca pri nízkom zdraví (dva tlmené údery). */
+  heartbeat(): void {
+    if (!this.ctx || this.muted) return;
+    this.tone('sine', 70, 40, 0.12, 0.35);
+    setTimeout(() => this.tone('sine', 60, 35, 0.14, 0.28), 170);
+  }
+
   play(events: GameEvent[], listener: { x: number; y: number }): void {
     if (!this.ctx || this.muted) return;
     for (const e of events) {
@@ -302,6 +309,10 @@ export class Sound {
           // Švih vzduchom, pri zásahu tupý úder.
           this.burst(0.09, 1400, 0.18, 1.5);
           if (e.hit) this.tone('sine', 140, 50, 0.12, 0.35);
+          break;
+        case 'dismember':
+          this.burst(0.22, 500, 0.4, 3);
+          this.tone('sawtooth', 120, 50, 0.25, 0.1);
           break;
         case 'takedown':
           this.tone('sine', 90, 40, 0.2, 0.4);

@@ -567,3 +567,58 @@ button.big {
 #focus-btn[hidden] {
   display: none;
 }
+
+/* Denné mesto */
+#daily h1 {
+  margin: 0;
+  font-size: 40px;
+  color: #ffd34e;
+  text-shadow: 4px 4px 0 var(--ink);
+}
+
+#daily p {
+  margin: 0;
+  max-width: 34em;
+  text-align: center;
+}
+
+.daily-mod {
+  color: #ff8a5a;
+}
+
+.daily-rules,
+.daily-best {
+  color: var(--muted);
+}
+
+.daily-result {
+  font-size: 20px;
+}
+
+.daily-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 15px;
+  min-width: 220px;
+}
+
+.daily-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 2px 0;
+  border-bottom: 1px solid #2a2636;
+}
+
+.daily-history li.today {
+  color: #ffd34e;
+}
+
+#daily [hidden] {
+  display: none;
+}
+
+.daily {
+  color: #ffd34e;
+}

@@ -3,7 +3,16 @@ import '@fontsource/pixelify-sans/700.css';
 import './styles.css';
 import { Sound } from './audio/audio';
 import { BATTERY_LOW, Game, type Carry, type GameEvent } from './game/game';
-import { FINAL_LEVEL } from './game/map';
+import { districtOf, FINAL_LEVEL } from './game/map';
+import {
+  dailyKey,
+  dailySetup,
+  parseRecords,
+  streak,
+  upsertRecord,
+  type DailyRecord,
+  type DailySetup,
+} from './game/daily';
 import { parseSave, serializeSave, type SaveData } from './game/save';
 import { buy, shopItems, type ShopItem } from './game/shop';
 import { Controls } from './input/input';
@@ -66,6 +75,45 @@ const readBest = (): number => {
   }
 };
 
+// --- Denné mesto: jeden pokus denne, história výsledkov ---
+const DAILY_KEY = 'deadpixels.daily';
+const dailyScreen = $('#daily');
+function readDaily(): DailyRecord[] {
+  try {
+    return parseRecords(localStorage.getItem(DAILY_KEY));
+  } catch {
+    return [];
+  }
+}
+function writeDaily(record: DailyRecord): void {
+  try {
+    localStorage.setItem(DAILY_KEY, JSON.stringify(upsertRecord(readDaily(), record)));
+  } catch {
+    // úložisko nedostupné
+  }
+}
+/** Rozohrané denné mesto (inak null). */
+let daily: DailySetup | null = null;
+const todayKey = () => dailyKey(new Date());
+const shortDate = (key: string) => {
+  const [, m, d] = key.split('-');
+  return `${Number(d)}. ${Number(m)}.`;
+};
+const clock = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+const DISTRICT_KEY = {
+  city: 'districtCity',
+  hospital: 'districtHospital',
+  metro: 'districtMetro',
+  base: 'districtBase',
+} as const;
+const MOD_KEY = {
+  dark: 'modDark',
+  runners: 'modRunners',
+  scarce: 'modScarce',
+  brutes: 'modBrutes',
+} as const;
+
 const sound = new Sound();
 let game: Game | null = null;
 let renderer: Renderer | null = null;
@@ -121,6 +169,10 @@ function renderTexts(): void {
   $('.controls').textContent = touch ? t('controlsTouch') : t('controlsDesktop');
   const best = readBest();
   $('.best').textContent = best > 0 ? `${t('best')}: ${best}` : '';
+  const today = readDaily().find((r) => r.key === todayKey());
+  $('.daily').textContent = today
+    ? t('dailyPlayed', { score: today.score })
+    : t('dailyButton', { date: shortDate(todayKey()) });
   document.querySelectorAll<HTMLButtonElement>('.langs button').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === getLanguage());
   });
@@ -153,20 +205,29 @@ let alarmHinted = false;
 
 let seed = 0;
 
-async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<void> {
+async function newGame(
+  level = 1,
+  carry?: Carry,
+  resumeSeed?: number,
+  dailyRun: DailySetup | null = null,
+): Promise<void> {
   sound.start();
   alarmHinted = false;
+  daily = dailyRun;
   if (resumeSeed !== undefined) seed = resumeSeed;
   else if (level === 1 || !seed) seed = Math.floor(Math.random() * 1e9);
-  // Postup sa uloží na začiatku každej úrovne (od druhej).
-  if (carry) writeSave({ version: 1, seed, level, carry, savedAt: new Date().toISOString() });
+  // Postup sa uloží na začiatku každej úrovne (od druhej); denné mesto uloženie nemení.
+  if (dailyRun) {
+    // nič — kampaň zostáva uložená
+  } else if (carry)
+    writeSave({ version: 1, seed, level, carry, savedAt: new Date().toISOString() });
   else clearSave();
   renderer?.destroy();
   renderer = null;
   game = null;
   host.innerHTML = '';
   // Slučka začne kresliť až po inicializácii renderera.
-  const next = new Game(seed, level, carry);
+  const next = new Game(seed, level, carry, dailyRun?.mod ?? null);
   const view = new Renderer(next);
   await view.init(host);
   game = next;
@@ -175,6 +236,7 @@ async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<v
   if (new URLSearchParams(location.search).has('debug'))
     (window as unknown as { __dp: unknown }).__dp = { game: next, renderer: view };
   start.hidden = true;
+  dailyScreen.hidden = true;
   title.stop();
   over.hidden = true;
   done.hidden = true;
@@ -182,14 +244,15 @@ async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<v
   hud.hidden = false;
   showTouchButtons(controls.touchMode);
   sound.music(true);
-  const districtKey = {
-    city: 'districtCity',
-    hospital: 'districtHospital',
-    metro: 'districtMetro',
-    base: 'districtBase',
-  } as const;
+  if (dailyRun) {
+    showBanner(t('dailyBanner', { district: t(DISTRICT_KEY[next.map.district]) }), 3);
+    setTimeout(() => {
+      if (game === next) showToast(t(MOD_KEY[dailyRun.mod]), 4);
+    }, 1500);
+    return;
+  }
   showBanner(
-    `${t('level', { n: level })} · ${t(districtKey[next.map.district])}${level > FINAL_LEVEL ? ` · ${t('endless')}` : ''}`,
+    `${t('level', { n: level })} · ${t(DISTRICT_KEY[next.map.district])}${level > FINAL_LEVEL ? ` · ${t('endless')}` : ''}`,
     3,
   );
   // Prvá úroveň: ako sa hrá potichu.
@@ -209,6 +272,99 @@ $('.continue').addEventListener('click', () => {
   const save = readSave();
   if (save) void newGame(save.level, save.carry, save.seed);
 });
+
+// --- Denné mesto: obrazovka ---
+
+/** Obrazovka denného mesta: pred hrou úvod a štart, po hre výsledok a história. */
+function showDaily(): void {
+  const key = todayKey();
+  const setup = dailySetup(key);
+  const records = readDaily();
+  const today = records.find((r) => r.key === key);
+  $('.daily-title').textContent = t('dailyTitle');
+  $('.daily-intro').textContent = t('dailyIntro', {
+    date: shortDate(key),
+    level: setup.level,
+    district: t(DISTRICT_KEY[districtOf(setup.level)]),
+  });
+  $('.daily-mod').textContent = t(MOD_KEY[setup.mod]);
+  $('.daily-rules').textContent = today ? t('dailyTomorrow') : t('dailyRules');
+  const result = $('.daily-result');
+  result.hidden = !today;
+  if (today)
+    result.textContent = `${today.done ? t('dailyDone') : t('dailyFailed')} — ${t('dailyResult', {
+      score: today.score,
+      kills: today.kills,
+      time: clock(today.time),
+    })}`;
+  const history = $('.daily-history');
+  history.innerHTML = '';
+  for (const r of records.slice(0, 7)) {
+    const li = document.createElement('li');
+    li.classList.toggle('today', r.key === key);
+    const date = document.createElement('span');
+    date.textContent = `${shortDate(r.key)} ${r.done ? '✓' : '✗'}`;
+    const score = document.createElement('span');
+    score.textContent = String(r.score);
+    li.append(date, score);
+    history.appendChild(li);
+  }
+  history.hidden = records.length === 0;
+  const best = Math.max(0, ...records.map((r) => r.score));
+  const run = streak(records, key);
+  $('.daily-best').textContent =
+    records.length > 0
+      ? `${t('dailyBest', { n: best })}${run > 1 ? ` · ${t('dailyStreak', { n: run })}` : ''}`
+      : '';
+  const startBtn = $<HTMLButtonElement>('.daily-start');
+  startBtn.hidden = !!today;
+  startBtn.textContent = t('dailyStart');
+  const share = $<HTMLButtonElement>('.daily-share');
+  share.hidden = !today;
+  share.textContent = t('dailyShare');
+  $('.daily-menu').textContent = t('toMenu');
+  start.hidden = true;
+  over.hidden = true;
+  toast.classList.remove('show');
+  banner.classList.remove('show');
+  dailyScreen.hidden = false;
+}
+
+$('.daily').addEventListener('click', showDaily);
+$('.daily-start').addEventListener('click', () => {
+  const key = todayKey();
+  if (readDaily().some((r) => r.key === key)) return showDaily();
+  const setup = dailySetup(key);
+  // Pokus sa započíta hneď (znovunačítanie stránky nedá druhú šancu).
+  writeDaily({ key, score: 0, kills: 0, time: 0, done: false });
+  void newGame(setup.level, setup.carry, setup.seed, setup);
+});
+$('.daily-share').addEventListener('click', () => {
+  const today = readDaily().find((r) => r.key === todayKey());
+  if (!today) return;
+  const text = t('dailyShareText', {
+    date: shortDate(today.key),
+    score: today.score,
+    mark: today.done ? '✓' : '✗',
+  });
+  void navigator.clipboard
+    ?.writeText(text)
+    .then(() => showToast(t('dailyCopied')))
+    .catch(() => showToast(text, 4));
+});
+$('.daily-menu').addEventListener('click', () => {
+  dailyScreen.hidden = true;
+  start.hidden = false;
+  renderTexts();
+});
+
+/** Koniec denného mesta: výsledok sa uloží (za dosiahnutie heliportu bonus). */
+function finishDaily(g: Game, done: boolean): void {
+  if (!daily) return;
+  const score = g.score + (done ? 500 * g.level : 0);
+  writeDaily({ key: daily.key, score, kills: g.kills, time: g.time, done });
+  daily = null;
+}
 
 // --- Obchod medzi úrovňami ---
 let shopCarry: Carry | null = null;
@@ -302,6 +458,8 @@ $('.endless').addEventListener('click', () => {
 });
 $('.victory-menu').addEventListener('click', () => $<HTMLButtonElement>('.to-menu').click());
 $('.to-menu').addEventListener('click', () => {
+  // Odchod z denného mesta ho ukončí s doterajším skóre.
+  if (game && daily) finishDaily(game, false);
   sound.music(false);
   victory.hidden = true;
   bossBar.hidden = true;
@@ -416,6 +574,22 @@ function react(events: GameEvent[], g: Game): void {
       navigator.vibrate?.([60, 40, 60]);
     }
     if (e.type === 'explode') navigator.vibrate?.(80);
+    if (daily && (e.type === 'levelComplete' || e.type === 'gameover')) {
+      finishDaily(g, e.type === 'levelComplete');
+      setTimeout(() => {
+        renderer?.destroy();
+        renderer = null;
+        game = null;
+        host.innerHTML = '';
+        hud.hidden = true;
+        bossBar.hidden = true;
+        showTouchButtons(false);
+        lowHp.classList.remove('on');
+        sound.music(false);
+        showDaily();
+      }, 1200);
+      continue;
+    }
     if (e.type === 'levelComplete' && e.final) {
       clearSave();
       setTimeout(() => {

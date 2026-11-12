@@ -1,3 +1,4 @@
+import type { DailyMod } from './daily';
 import { FlowField } from './flowfield';
 import { castRay, lineOfSight, moveCircle, type Vec } from './geometry';
 import {
@@ -399,8 +400,12 @@ export class Game {
   /** Autá, ktorých alarm už húkal (každé len raz). */
   private alarmed = new Set<number>();
 
-  constructor(seed: number, level = 1, carry?: Carry) {
+  /** Mutácia denného mesta (inak null). */
+  readonly mod: DailyMod | null;
+
+  constructor(seed: number, level = 1, carry?: Carry, mod: DailyMod | null = null) {
     this.level = level;
+    this.mod = mod;
     this.rng = createRng(seed ^ 0x51ed ^ level);
     this.map = generateLevel(seed, level);
     this.flow = new FlowField(this.map);
@@ -425,7 +430,7 @@ export class Game {
       grenades: carry?.grenades ?? 2,
       grabbed: 0,
       // Do novej úrovne pár nájdených batérií navyše.
-      battery: carry ? Math.min(100, (carry.battery ?? 100) + 30) : 100,
+      battery: carry ? Math.min(100, (carry.battery ?? 100) + (mod ? 0 : 30)) : 100,
       light: true,
       focus: 0,
       focusCooldown: 0,
@@ -527,6 +532,7 @@ export class Game {
 
   /** Sila lámp 0–1 (pri výpadku blikajú, potom zhasnú). */
   get lampsPower(): number {
+    if (this.mod === 'dark') return 0;
     const o = this.outage;
     if (!o || o.phase === 'armed' || o.phase === 'done') return 1;
     if (o.phase === 'flicker') return Math.sin(o.t * 37) + Math.sin(o.t * 13) > 0.3 ? 1 : 0;
@@ -1041,7 +1047,8 @@ export class Game {
     this.cash += CASH_PER_KILL[z.kind];
     this.events.push({ type: 'kill', x: z.x, y: z.y, angle, kind: z.kind });
     if (z.kind === 'exploder') this.explode(z.x, z.y);
-    const dropChance = z.kind === 'brute' || z.kind === 'boss' ? 1 : 0.07;
+    const dropChance =
+      z.kind === 'brute' || z.kind === 'boss' ? 1 : this.mod === 'scarce' ? 0.035 : 0.07;
     if (this.rng() < dropChance) this.drop(z.x, z.y);
     if (z.kind === 'boss') {
       this.drop(z.x + 10, z.y);
@@ -1160,7 +1167,7 @@ export class Game {
       const comp: Record<ZombieKind, number> =
         room.encounter === 'boss'
           ? { walker: 4 + this.level, runner: 2, brute: 0, exploder: 1, spitter: 0, boss: 0 }
-          : hordeComposition(this.level);
+          : this.mutate(hordeComposition(this.level));
       this.fillHorde(comp);
       if (room.encounter === 'boss') {
         const at = this.spawnPoint(room) ?? {
@@ -1174,6 +1181,21 @@ export class Game {
       this.spawnTimer = 1;
       if (room.encounter === 'horde') this.events.push({ type: 'horde', room: room.index });
     }
+  }
+
+  /** Mutácia dňa mení zloženie hord: viac bežcov alebo obrov. */
+  private mutate(comp: Record<ZombieKind, number>): Record<ZombieKind, number> {
+    const out = { ...comp };
+    if (this.mod === 'runners') {
+      const moved = Math.floor(out.walker * 0.5);
+      out.walker -= moved;
+      out.runner += moved;
+    }
+    if (this.mod === 'brutes') {
+      out.brute += 2;
+      out.walker = Math.max(0, out.walker - 2);
+    }
+    return out;
   }
 
   /** Front hordy podľa zloženia, v náhodnom poradí. */
@@ -1219,7 +1241,7 @@ export class Game {
     o.phase = 'horde';
     if (room.doorIn !== null) this.setGate(room.doorIn, false);
     if (room.doorOut !== null) this.setGate(room.doorOut, false);
-    const full = hordeComposition(this.level);
+    const full = this.mutate(hordeComposition(this.level));
     const comp = { ...full };
     for (const kind of Object.keys(comp) as ZombieKind[]) comp[kind] = Math.floor(full[kind] * 0.6);
     comp.walker = Math.max(4, comp.walker);

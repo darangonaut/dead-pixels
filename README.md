@@ -73,6 +73,14 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
   zásah občas chodcovi alebo bežcovi odtrhne nohy — plazí sa ďalej, pomaly, ale stále hryzie.
 - Pri nízkom zdraví pulzujú okraje obrazovky a bije srdce.
 
+## Denné mesto
+
+Na úvodnej obrazovke **Denné mesto**: každý deň jedno mesto, pre všetkých hráčov rovnaké
+(semienko z dátumu), s mutáciou dňa — bez prúdu, bežci, nedostatok alebo obri. Pevná výbava,
+dva životy a **jeden pokus**: započíta sa hneď po štarte. Za dosiahnutie heliportu je bonus.
+Výsledky sa ukladajú do histórie (posledné dni, najlepšie skóre, séria dní po sebe)
+a výsledok sa dá skopírovať a poslať ďalej. Uložený postup kampane sa nemení.
+
 ## Ticho a tma
 
 - **Hluk:** každá zbraň má hlasitosť. Kruh po výstrele ukazuje, kam až ho počuť: zombie blízko

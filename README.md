@@ -34,10 +34,13 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
 | Akcia    | Počítač                 | Mobil (na šírku)           |
 | -------- | ----------------------- | -------------------------- |
 | Pohyb    | WASD / šípky            | ľavý palec (páčka)         |
+| Plíženie | Shift                   | ľavá páčka len jemne       |
 | Mierenie | myš                     | pravý palec (páčka)        |
 | Streľba  | ľavé tlačidlo / medzera | pravá páčka vychýlená viac |
-| Zbraň    | 1–4, koliesko, Q / E    | tlačidlo ⇄                 |
+| Zbraň    | 1–5, koliesko, Q / E    | tlačidlo ⇄                 |
 | Granát   | G / pravé tlačidlo      | tlačidlo 💣                |
+| Baterka  | F                       | tlačidlo 🔦                |
+| Oslepiť  | V / stredné tlačidlo    | tlačidlo ✦                 |
 | Zvuk     | M                       | tlačidlo ♪                 |
 | Pauza    | Esc / P                 | tlačidlo ❚❚                |
 
@@ -50,7 +53,7 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
   ktoré si ťa všimnú, keď ťa uvidia alebo začujú streľbu, a pokojné úseky so zásobami.
 - Kontrolné body: po smrti začneš na začiatku úseku. 3 životy, +1 za každú dokončenú úroveň.
   Šípka pri hráčovi ukazuje smer k ďalším dverám.
-- Zbrane: pištoľ (neobmedzené náboje), brokovnica, samopal a plameňomet (zapáli zombie).
+- Zbrane: pajcer a pištoľ (oboje bez nábojov), brokovnica, samopal a plameňomet (zapáli zombie).
   Granáty (G / pravé tlačidlo, na mobile 💣) a červené výbušné sudy — výbuch zraní hordu
   a reťazovo odpáli ďalšie sudy.
 - Obchod po každej úrovni: za peniaze zo zombie a z úsekov kúpiš zbrane, náboje, granáty
@@ -65,6 +68,22 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
   (rozbehne sa za hráčom; keď narazí do steny, je omráčený).
 - Tma: baterka, lampy (niektoré blikajú alebo nesvietia) a záblesky výstrelov.
 - Krv a mŕtvoly zostávajú na zemi.
+
+## Ticho a tma
+
+- **Hluk:** každá zbraň má hlasitosť. Kruh po výstrele ukazuje, kam až ho počuť: zombie blízko
+  hneď zbystria, vzdialenejšie prídu miesto preskúmať. Pištoľ je počuť na pol ulice,
+  brokovnicu takmer všade a výbuch ešte ďalej. Obyčajné kroky počuť aj cez stenu, plíženie
+  (polovičná rýchlosť) je tiché.
+- **Pajcer** (1) je tichý a nič netušiacu zombie zloží jedným úderom zozadu (obra a bossa
+  len poriadne zraní).
+- **Baterka sa vybíja.** Batérie sa dajú nájsť v úsekoch, padajú zo zombie, dá ti ich
+  preživší a dajú sa kúpiť v obchode. Slabá baterka bliká, svieti kratšie a užšie, vybitá
+  už len slabo žeraví.
+  Vypnutá baterka šetrí batériu a skrýva ťa: svetlo do tváre zombie zbadá zďaleka, v tme
+  a pri plížení ťa uvidí až zblízka.
+- **Sústredený lúč** (V): krátky ostrý záblesk do úzkeho kužeľa oslepí zombie na necelé
+  dve sekundy (bossa na chvíľu a preruší mu nádych). Stojí kus batérie a chvíľu sa dobíja.
 
 ## Prekvapenia
 

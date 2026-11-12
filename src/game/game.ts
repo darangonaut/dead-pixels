@@ -19,13 +19,14 @@ import { SpatialHash } from './spatial';
 import {
   damageFactor,
   flashlightFactor,
+  BATTERY_PACK,
   MAX_GRENADES,
   maxHpFor,
   NO_UPGRADES,
   speedFactor,
   type Upgrades,
 } from './shop';
-import { WEAPON_ORDER, WEAPONS, type WeaponId } from './weapons';
+import { STARTING_WEAPONS, WEAPON_ORDER, WEAPONS, type WeaponId } from './weapons';
 
 export type ZombieKind = 'walker' | 'runner' | 'brute' | 'exploder' | 'spitter' | 'boss';
 
@@ -69,6 +70,8 @@ export interface Zombie {
   /** Láka ju zvuk (alarm auta): kam ide a ako dlho ešte (s). */
   lure: Vec | null;
   lureTime: number;
+  /** Oslepená sústredeným lúčom baterky (s) — stojí a neútočí. */
+  blind: number;
 }
 
 /** Spustený alarm auta: húka, bliká a láka zombie z okolia. */
@@ -140,7 +143,7 @@ export interface Spit {
 
 export interface Pickup {
   id: number;
-  kind: 'ammo' | 'health' | 'weapon' | 'cash' | 'grenade';
+  kind: 'ammo' | 'health' | 'weapon' | 'cash' | 'grenade' | 'battery';
   weapon?: WeaponId;
   /** Hodnota balíka peňazí. */
   value?: number;
@@ -166,6 +169,17 @@ export interface Player {
   grenades: number;
   /** Schmatla ho zombie zozadu (s) — pohyb je pomalší. */
   grabbed: number;
+  /** Batéria baterky (0–100). */
+  battery: number;
+  /** Baterka zapnutá. */
+  light: boolean;
+  /** Sústredený lúč práve svieti (s) a čas do ďalšieho (s). */
+  focus: number;
+  focusCooldown: number;
+  /** Plíži sa (pomalšie a ticho). */
+  sneaking: boolean;
+  /** Odpočet do ďalšieho hlasného kroku (s). */
+  stepNoise: number;
 }
 
 /** Čo si hráč nesie do ďalšej úrovne. */
@@ -179,6 +193,8 @@ export interface Carry {
   cash: number;
   grenades: number;
   upgrades: Upgrades;
+  /** Batéria baterky (0–100); chýba v starších uloženiach. */
+  battery?: number;
 }
 
 /** Peniaze za zabitie podľa druhu zombie. */
@@ -204,6 +220,12 @@ export interface Input {
   /** Hodiť granát; `throwDistance` = ako ďaleko (px), inak predvolene. */
   throwGrenade?: boolean;
   throwDistance?: number | null;
+  /** Plížiť sa (Shift / malé vychýlenie páčky). */
+  sneak?: boolean;
+  /** Zapnúť / vypnúť baterku. */
+  toggleLight?: boolean;
+  /** Sústredený lúč: oslepí zombie pred hráčom. */
+  focus?: boolean;
 }
 
 export type GameEvent =
@@ -241,6 +263,12 @@ export type GameEvent =
   | { type: 'survivorCall'; x: number; y: number; first: boolean }
   | { type: 'survivorGift'; x: number; y: number }
   | { type: 'survivorTrap'; x: number; y: number }
+  | { type: 'noise'; x: number; y: number; radius: number }
+  | { type: 'swing'; x: number; y: number; angle: number; hit: boolean }
+  | { type: 'takedown'; x: number; y: number }
+  | { type: 'focus'; x: number; y: number; angle: number }
+  | { type: 'light'; on: boolean }
+  | { type: 'batteryLow' }
   | { type: 'gameover' };
 
 export const PLAYER_RADIUS = 5;
@@ -276,6 +304,24 @@ const ALARM_RANGE = 280;
 const SURVIVOR_HEAR = 150;
 const SURVIVOR_REACH = 40;
 const SPIT_SPEED = 110;
+
+/** Baterka: dosah a šírka kužeľa (px, rad). */
+export const FLASHLIGHT_RANGE = 200;
+export const FLASHLIGHT_SPREAD = 0.95;
+/** Batéria: spotreba za sekundu svietenia a hranica slabej batérie. */
+const BATTERY_DRAIN = 100 / 210;
+export const BATTERY_LOW = 20;
+/** Sústredený lúč: cena, trvanie, dobíjanie, dosah, šírka a oslepenie (s). */
+const FOCUS_COST = 12;
+const FOCUS_TIME = 0.35;
+const FOCUS_COOLDOWN = 1.8;
+export const FOCUS_RANGE = 230;
+export const FOCUS_SPREAD = 0.34;
+const BLIND_TIME = 1.8;
+/** Kroky (bez plíženia) počuť na pár metrov, každých pár desatín sekundy. */
+const STEP_NOISE = 46;
+/** Výbuch počuť ďaleko. */
+const BLAST_NOISE = 320;
 
 /** Zloženie hordy v úseku podľa úrovne. */
 export function hordeComposition(level: number): Record<ZombieKind, number> {
@@ -333,6 +379,8 @@ export class Game {
   private readonly rng: () => number;
   private readonly hash = new SpatialHash<Zombie>(32);
   private readonly nearby: Zombie[] = [];
+  /** Samostatný zoznam pre hluk (volá sa aj počas prechodu `nearby`). */
+  private readonly heard: Zombie[] = [];
   private flowTimer = 0;
   private groanTimer = 2;
   /** Náhoda pre prekvapenia (oddelená, aby nemenila mapu ani priebeh boja). */
@@ -363,15 +411,23 @@ export class Game {
       hp: maxHpFor(this.upgrades),
       weapon: carry?.weapon ?? 'pistol',
       ammo: carry
-        ? { ...carry.ammo, flamer: carry.ammo.flamer ?? 0 }
-        : { pistol: Infinity, shotgun: 0, smg: 0, flamer: 0 },
-      owned: carry ? [...carry.owned] : ['pistol'],
+        ? { ...carry.ammo, flamer: carry.ammo.flamer ?? 0, crowbar: Infinity }
+        : { crowbar: Infinity, pistol: Infinity, shotgun: 0, smg: 0, flamer: 0 },
+      owned: carry ? [...carry.owned] : [...STARTING_WEAPONS],
       cooldown: 0,
       hurt: 0,
       step: 0,
       grenades: carry?.grenades ?? 2,
       grabbed: 0,
+      // Do novej úrovne pár nájdených batérií navyše.
+      battery: carry ? Math.min(100, (carry.battery ?? 100) + 30) : 100,
+      light: true,
+      focus: 0,
+      focusCooldown: 0,
+      sneaking: false,
+      stepNoise: 0,
     };
+    for (const w of STARTING_WEAPONS) if (!this.player.owned.includes(w)) this.player.owned.push(w);
     // Zásoby položené v úsekoch.
     for (const room of this.map.rooms)
       for (const item of room.loot)
@@ -531,6 +587,7 @@ export class Game {
       cash: this.cash,
       grenades: p.grenades,
       upgrades: { ...this.upgrades },
+      battery: p.battery,
     };
   }
 
@@ -594,10 +651,23 @@ export class Game {
       mx /= len;
       my /= len;
     }
-    if (len > 0.05) p.step += dt * 10 * Math.min(1, len);
+    p.sneaking = !!input.sneak;
+    const moving = len > 0.05;
+    if (moving) p.step += dt * (p.sneaking ? 6 : 10) * Math.min(1, len);
     p.grabbed = Math.max(0, p.grabbed - dt);
-    const speed = PLAYER_SPEED * speedFactor(this.upgrades) * (p.grabbed > 0 ? 0.35 : 1);
+    const speed =
+      PLAYER_SPEED *
+      speedFactor(this.upgrades) *
+      (p.grabbed > 0 ? 0.35 : 1) *
+      (p.sneaking ? 0.5 : 1);
     moveCircle(this.map, p, PLAYER_RADIUS, mx * speed * dt, my * speed * dt);
+    // Kroky: kto sa neplíži, toho počuť (aj cez steny).
+    p.stepNoise -= dt;
+    if (moving && !p.sneaking && p.stepNoise <= 0) {
+      p.stepNoise = 0.4;
+      this.noise(p.x, p.y, STEP_NOISE, false);
+    }
+    this.updateFlashlight(dt, input);
     if (input.aim !== null) p.angle = input.aim;
     p.hurt = Math.max(0, p.hurt - dt);
 
@@ -613,7 +683,10 @@ export class Game {
     if (p.ammo[p.weapon] <= 0) p.weapon = 'pistol';
 
     p.cooldown = Math.max(0, p.cooldown - dt);
-    if (input.firing && p.cooldown === 0) this.fire();
+    if (input.firing && p.cooldown === 0) {
+      if (p.weapon === 'crowbar') this.swing();
+      else this.fire();
+    }
     if (input.throwGrenade && p.grenades > 0) this.throwGrenade(input.throwDistance ?? 90);
   }
 
@@ -709,7 +782,7 @@ export class Game {
     if (Number.isFinite(p.ammo[p.weapon])) p.ammo[p.weapon]--;
     if (p.weapon === 'flamer') {
       this.flame();
-      for (const z of this.hash.near(p.x, p.y, 100, this.nearby)) z.aware = true;
+      this.noise(p.x, p.y, weapon.noise, false);
       return;
     }
     const muzzle = { x: p.x + Math.cos(p.angle) * 7, y: p.y + Math.sin(p.angle) * 7 };
@@ -734,8 +807,153 @@ export class Game {
       angle: p.angle,
       hits,
     });
-    // Výstrel prebudí zombie v okolí.
-    for (const z of this.hash.near(p.x, p.y, 120, this.nearby)) z.aware = true;
+    // Výstrel počuť: zombie v okolí zbystria, ďalšie prídu pozrieť, čo sa deje.
+    this.noise(p.x, p.y, weapon.noise);
+  }
+
+  /**
+   * Hluk: zombie bližšie ako ~polovica dosahu zbystria a idú po hráčovi, ďalšie v dosahu
+   * prídu preskúmať miesto zvuku. Falošných mŕtvych a bossa nepreruší.
+   */
+  private noise(x: number, y: number, radius: number, visible = true): void {
+    if (visible) this.events.push({ type: 'noise', x, y, radius });
+    for (const z of this.hash.near(x, y, radius, this.heard)) {
+      if (z.aware || z.hp <= 0 || z.kind === 'boss' || z.state === 'lying' || z.state === 'rising')
+        continue;
+      const d = Math.hypot(z.x - x, z.y - y);
+      if (d > radius) continue;
+      if (d < radius * 0.45) z.aware = true;
+      else {
+        z.lure = { x, y };
+        z.lureTime = Math.max(z.lureTime, 4);
+      }
+    }
+  }
+
+  /** Pajcer: tichý úder do oblúka pred hráčom (najviac dve zombie). Nič netušiacu zloží naraz. */
+  private swing(): void {
+    const p = this.player;
+    const def = WEAPONS.crowbar;
+    p.cooldown = 1 / def.rate;
+    const dmg = def.damage * damageFactor(this.upgrades);
+    const targets = this.hash
+      .near(p.x, p.y, def.range + 12, this.nearby)
+      .filter((z) => {
+        if (z.hp <= 0) return false;
+        const dx = z.x - p.x;
+        const dy = z.y - p.y;
+        if (Math.hypot(dx, dy) > def.range + ZOMBIES[z.kind].radius) return false;
+        let diff = Math.atan2(dy, dx) - p.angle;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        return Math.abs(diff) <= def.spread / 2 && lineOfSight(this.map, p, z);
+      })
+      .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
+      .slice(0, 2);
+    for (const z of targets) {
+      const unaware = !z.aware || z.state === 'lying';
+      const angle = Math.atan2(z.y - p.y, z.x - p.x);
+      if (unaware && z.kind !== 'boss' && z.kind !== 'brute') {
+        // Tiché zneškodnenie zozadu / v tme.
+        z.hp = 0;
+        this.score += 15 * this.level;
+        this.events.push({ type: 'takedown', x: z.x, y: z.y });
+      } else z.hp -= unaware ? dmg * 3 : dmg;
+      z.stagger = 0.25;
+      z.aware = true;
+      const resist = z.kind === 'boss' ? 0.08 : z.kind === 'brute' ? 0.4 : 1;
+      z.vx += Math.cos(angle) * def.knockback * 20 * resist;
+      z.vy += Math.sin(angle) * def.knockback * 20 * resist;
+      if (z.hp <= 0) this.killZombie(z, angle);
+      else this.events.push({ type: 'hit', x: z.x, y: z.y, angle, kind: z.kind });
+    }
+    this.events.push({
+      type: 'swing',
+      x: p.x + Math.cos(p.angle) * 8,
+      y: p.y + Math.sin(p.angle) * 8,
+      angle: p.angle,
+      hit: targets.length > 0,
+    });
+    this.noise(p.x, p.y, def.noise, false);
+  }
+
+  /** Baterka: zapnutie, spotreba batérie, sústredený lúč. */
+  private updateFlashlight(dt: number, input: Input): void {
+    const p = this.player;
+    if (input.toggleLight) {
+      p.light = !p.light;
+      this.events.push({ type: 'light', on: p.light });
+    }
+    if (p.light && p.battery > 0) {
+      const before = p.battery;
+      const drain = BATTERY_DRAIN * (1 - this.upgrades.flashlight * 0.1);
+      p.battery = Math.max(0, p.battery - drain * dt);
+      if (before >= BATTERY_LOW && p.battery < BATTERY_LOW)
+        this.events.push({ type: 'batteryLow' });
+    }
+    p.focus = Math.max(0, p.focus - dt);
+    p.focusCooldown = Math.max(0, p.focusCooldown - dt);
+    if (input.focus) this.focusBeam();
+  }
+
+  /** Sústredený lúč: krátky silný záblesk do úzkeho kužeľa oslepí zombie (boss len nakrátko). */
+  private focusBeam(): void {
+    const p = this.player;
+    if (p.focusCooldown > 0 || p.battery < FOCUS_COST) return;
+    if (!p.light) {
+      p.light = true;
+      this.events.push({ type: 'light', on: true });
+    }
+    p.battery -= FOCUS_COST;
+    p.focus = FOCUS_TIME;
+    p.focusCooldown = FOCUS_COOLDOWN;
+    const range = FOCUS_RANGE * this.flashlightScale;
+    for (const z of this.zombies) {
+      if (z.hp <= 0 || z.state === 'lying' || z.state === 'charge') continue;
+      const dx = z.x - p.x;
+      const dy = z.y - p.y;
+      const d = Math.hypot(dx, dy);
+      const r = ZOMBIES[z.kind].radius;
+      if (d > range + r) continue;
+      let diff = Math.atan2(dy, dx) - p.angle;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      if (Math.abs(diff) > FOCUS_SPREAD / 2 + Math.atan2(r, d) || !lineOfSight(this.map, p, z))
+        continue;
+      z.blind = z.kind === 'boss' ? 0.9 : BLIND_TIME;
+      z.aware = true;
+      if (z.state === 'rising') z.state = 'normal';
+      if (z.kind === 'boss' && z.state === 'windup') {
+        z.state = 'normal';
+        z.timer = 2;
+      }
+    }
+    this.events.push({ type: 'focus', x: p.x, y: p.y, angle: p.angle });
+  }
+
+  /** Sila baterky 0–1 (0 = vypnutá; vybitá ešte slabo žeraví). */
+  get flashlightPower(): number {
+    const p = this.player;
+    if (!p.light) return 0;
+    if (p.battery <= 0) return 0.35;
+    if (p.battery < BATTERY_LOW) return 0.35 + (0.65 * p.battery) / BATTERY_LOW;
+    return 1;
+  }
+
+  /**
+   * Na akú vzdialenosť si nič netušiaca zombie hráča všimne: svetlo do tváre je vidieť
+   * zďaleka, v tme a pri plížení len zblízka.
+   */
+  private noticeRange(z: Zombie, dist: number): number {
+    const p = this.player;
+    const sneak = p.sneaking ? 0.6 : 1;
+    const power = this.flashlightPower;
+    if (power <= 0) return 60 * sneak;
+    let diff = Math.atan2(z.y - p.y, z.x - p.x) - p.angle;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    const lit =
+      Math.abs(diff) < FLASHLIGHT_SPREAD / 2 &&
+      dist < FLASHLIGHT_RANGE * this.flashlightScale * power;
+    if (lit) return AWARE_RANGE + 20 * power;
+    return (85 + 40 * power) * sneak;
   }
 
   /** Strela: prvá zombie na lúči do steny. Vráti bod dopadu. */
@@ -832,6 +1050,7 @@ export class Game {
       z.vy += ((z.y - y) / (dz || 1)) * 120;
       if (z.hp <= 0) this.killZombie(z, Math.atan2(z.y - y, z.x - x));
     }
+    this.noise(x, y, BLAST_NOISE, false);
   }
 
   private damagePlayer(amount: number): void {
@@ -854,7 +1073,9 @@ export class Game {
         ? 'weapon'
         : p.hp < this.maxHp * 0.6 && this.rng() < 0.4
           ? 'health'
-          : 'ammo';
+          : p.battery < 40 && this.rng() < 0.5
+            ? 'battery'
+            : 'ammo';
     this.pickups.push({
       id: this.nextId++,
       kind,
@@ -1055,6 +1276,7 @@ export class Game {
       twitch: 0,
       lure: null,
       lureTime: 0,
+      blind: 0,
     };
     if (kind === 'boss') z.hp = ZOMBIES.boss.hp + this.level * 12;
     z.maxHp = z.hp;
@@ -1081,6 +1303,7 @@ export class Game {
     const p = this.player;
     p.hp = this.maxHp;
     p.hurt = 1;
+    p.battery = Math.max(p.battery, 25);
     p.x = room.entry.x;
     p.y = room.entry.y;
     this.score = Math.floor(this.score * 0.85);
@@ -1138,11 +1361,20 @@ export class Game {
         continue;
       }
       const def = ZOMBIES[z.kind];
+      if (z.blind > 0) {
+        // Oslepená: potáca sa na mieste, neútočí.
+        z.blind -= dt;
+        z.vx *= Math.exp(-10 * dt);
+        z.vy *= Math.exp(-10 * dt);
+        moveCircle(this.map, z, def.radius, z.vx * dt, z.vy * dt);
+        z.cooldown = Math.max(z.cooldown, 0.3);
+        continue;
+      }
       const toX = p.x - z.x;
       const toY = p.y - z.y;
       const dist = Math.hypot(toX, toY) || 0.001;
       const sees = dist < 220 && lineOfSight(this.map, z, p);
-      if (!z.aware && dist < AWARE_RANGE && sees) z.aware = true;
+      if (!z.aware && sees && dist < this.noticeRange(z, dist)) z.aware = true;
       let ax = 0;
       let ay = 0;
       let speed = def.speed;
@@ -1387,7 +1619,11 @@ export class Game {
         } else {
           sv.phase = 'gift';
           // Zásoby dopadnú pred okno, k hráčovi.
-          const kinds: Pickup['kind'][] = ['health', 'ammo', this.rng() < 0.5 ? 'grenade' : 'cash'];
+          const kinds: Pickup['kind'][] = [
+            'health',
+            this.player.battery < 60 ? 'battery' : 'ammo',
+            this.rng() < 0.5 ? 'grenade' : 'cash',
+          ];
           kinds.forEach((kind, i) => {
             const side = (i - 1) * 12;
             this.pickups.push({
@@ -1468,6 +1704,9 @@ export class Game {
         p.hp = Math.min(this.maxHp, p.hp + 35);
       } else if (item.kind === 'cash') {
         this.cash += item.value ?? 20;
+      } else if (item.kind === 'battery') {
+        if (p.battery >= 100) return true;
+        p.battery = Math.min(100, p.battery + BATTERY_PACK);
       } else if (item.kind === 'grenade') {
         if (p.grenades >= MAX_GRENADES) return true;
         p.grenades = Math.min(MAX_GRENADES, p.grenades + 2);

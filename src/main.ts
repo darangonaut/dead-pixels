@@ -2,7 +2,7 @@ import '@fontsource/pixelify-sans/400.css';
 import '@fontsource/pixelify-sans/700.css';
 import './styles.css';
 import { Sound } from './audio/audio';
-import { Game, type Carry, type GameEvent } from './game/game';
+import { BATTERY_LOW, Game, type Carry, type GameEvent } from './game/game';
 import { FINAL_LEVEL } from './game/map';
 import { parseSave, serializeSave, type SaveData } from './game/save';
 import { buy, shopItems, type ShopItem } from './game/shop';
@@ -26,6 +26,12 @@ const toast = $('#toast');
 const hurt = $('#hurt');
 const weaponBtn = $<HTMLButtonElement>('#weapon-btn');
 const grenadeBtn = $<HTMLButtonElement>('#grenade-btn');
+const lightBtn = $<HTMLButtonElement>('#light-btn');
+const focusBtn = $<HTMLButtonElement>('#focus-btn');
+/** Dotykové tlačidlá počas hry. */
+const touchButtons = [weaponBtn, grenadeBtn, lightBtn, focusBtn];
+const showTouchButtons = (show: boolean) => touchButtons.forEach((b) => (b.hidden = !show));
+const isTouch = () => window.matchMedia('(pointer: coarse)').matches || controls.touchMode;
 
 // --- Uložený postup (začiatok poslednej úrovne s výbavou) ---
 const SAVE_KEY = 'deadpixels.save';
@@ -64,10 +70,7 @@ const sound = new Sound();
 let game: Game | null = null;
 let renderer: Renderer | null = null;
 const controls = new Controls(host, { move: $('#stick-move'), aim: $('#stick-aim') });
-controls.onTouchMode = () => {
-  weaponBtn.hidden = !game;
-  grenadeBtn.hidden = !game;
-};
+controls.onTouchMode = () => showTouchButtons(!!game);
 grenadeBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   controls.requestGrenade();
@@ -75,6 +78,14 @@ grenadeBtn.addEventListener('pointerdown', (e) => {
 weaponBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   controls.nextWeapon();
+});
+lightBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  controls.toggleLight();
+});
+focusBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  controls.requestFocus();
 });
 
 // --- Obrazovky ---
@@ -169,8 +180,7 @@ async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<v
   done.hidden = true;
   victory.hidden = true;
   hud.hidden = false;
-  weaponBtn.hidden = !controls.touchMode;
-  grenadeBtn.hidden = !controls.touchMode;
+  showTouchButtons(controls.touchMode);
   sound.music(true);
   const districtKey = {
     city: 'districtCity',
@@ -182,6 +192,11 @@ async function newGame(level = 1, carry?: Carry, resumeSeed?: number): Promise<v
     `${t('level', { n: level })} · ${t(districtKey[next.map.district])}${level > FINAL_LEVEL ? ` · ${t('endless')}` : ''}`,
     3,
   );
+  // Prvá úroveň: ako sa hrá potichu.
+  if (level === 1)
+    setTimeout(() => {
+      if (game === next) showToast(t(isTouch() ? 'hintStealthTouch' : 'hintStealth'), 5);
+    }, 3200);
 }
 
 // Ladenie: `?debug&level=N` začne rovno na N-tej úrovni.
@@ -205,6 +220,7 @@ function itemLabel(item: ShopItem): string {
   if (kind === 'weapon') return t('itemWeapon', { weapon: t(what as 'shotgun') });
   if (kind === 'ammo') return t('itemAmmo', { weapon: t(what as 'shotgun'), n: item.level ?? 0 });
   if (kind === 'grenades') return t('itemGrenades', params);
+  if (kind === 'batteries') return t('itemBatteries', params);
   const key = {
     damage: 'itemDamage',
     flashlight: 'itemFlashlight',
@@ -295,8 +311,7 @@ $('.to-menu').addEventListener('click', () => {
   game = null;
   host.innerHTML = '';
   hud.hidden = true;
-  weaponBtn.hidden = true;
-  grenadeBtn.hidden = true;
+  showTouchButtons(false);
   start.hidden = false;
   title.start();
   renderTexts();
@@ -335,23 +350,36 @@ const livesEl = $('.lives');
 const bossFill = $('.boss-fill');
 const grenadesEl = $('.grenades');
 const cashEl = $('.cash');
+const batFill = $('.bat-fill');
+const batBar = $('.bat');
 
 function updateHud(g: Game): void {
   const boss = g.boss;
   bossBar.hidden = !boss;
   if (boss) bossFill.style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
   const p = g.player;
-  const ammoText = Number.isFinite(p.ammo[p.weapon]) ? String(p.ammo[p.weapon]) : '∞';
+  const ammoText =
+    p.weapon === 'crowbar'
+      ? ''
+      : Number.isFinite(p.ammo[p.weapon])
+        ? String(p.ammo[p.weapon])
+        : '∞';
+  const battery = Math.ceil(p.battery);
+  batBar.classList.toggle('low', p.battery < BATTERY_LOW);
+  batBar.classList.toggle('off', !p.light);
+  lightBtn.classList.toggle('off', !p.light);
+  focusBtn.classList.toggle('off', p.focusCooldown > 0 || p.battery < 12);
   const horde = g.hordeRemaining;
   const roomIndex = Math.max(0, g.room);
   const waveText =
     horde !== null
       ? t('hordeLeft', { n: horde })
       : `${t('level', { n: g.level })} · ${t('section', { i: roomIndex + 1, n: g.map.rooms.length })}`;
-  const key = `${p.hp}|${p.weapon}|${ammoText}|${waveText}|${g.kills}|${g.score}|${g.lives}|${g.cash}|${p.grenades}|${getLanguage()}`;
+  const key = `${p.hp}|${p.weapon}|${ammoText}|${waveText}|${g.kills}|${g.score}|${g.lives}|${g.cash}|${p.grenades}|${battery}|${getLanguage()}`;
   if (key === lastHud) return;
   lastHud = key;
   hpFill.style.width = `${(p.hp / g.maxHp) * 100}%`;
+  batFill.style.width = `${battery}%`;
   weaponName.textContent = t(p.weapon);
   ammo.textContent = ammoText;
   waveLabel.textContent = waveText;
@@ -380,6 +408,8 @@ function react(events: GameEvent[], g: Game): void {
       showToast(t('carAlarm'));
     }
     if (e.type === 'powerBack') showToast(t('powerBack'));
+    if (e.type === 'batteryLow') showToast(t(isTouch() ? 'batteryLowTouch' : 'batteryLow'), 3);
+    if (e.type === 'takedown') showToast(t('takedown'));
     if (e.type === 'grab') {
       showToast(t('grabbed'));
       navigator.vibrate?.([60, 40, 60]);
@@ -390,8 +420,7 @@ function react(events: GameEvent[], g: Game): void {
       setTimeout(() => {
         $('.victory-stats').textContent = t('victoryStats', { kills: g.kills, score: g.score });
         victory.hidden = false;
-        weaponBtn.hidden = true;
-        grenadeBtn.hidden = true;
+        showTouchButtons(false);
         bossBar.hidden = true;
         // Nekonečný režim pokračuje s výbavou — obchod pred ním.
         shopCarry = g.carry();
@@ -404,8 +433,7 @@ function react(events: GameEvent[], g: Game): void {
         shopLevel = g.level + 1;
         renderShop();
         done.hidden = false;
-        weaponBtn.hidden = true;
-        grenadeBtn.hidden = true;
+        showTouchButtons(false);
       }, 900);
     }
     if (e.type === 'hurt') {
@@ -423,7 +451,9 @@ function react(events: GameEvent[], g: Game): void {
               ? t('pickupCash', { n: 20 + g.level * 5 })
               : e.kind === 'grenade'
                 ? t('pickupGrenade')
-                : t('pickupAmmo'),
+                : e.kind === 'battery'
+                  ? t('pickupBattery')
+                  : t('pickupAmmo'),
       );
     if (e.type === 'gameover') {
       clearSave();
@@ -445,7 +475,7 @@ function react(events: GameEvent[], g: Game): void {
           ? t('newBest')
           : `${t('best')}: ${Math.max(best, g.score)}`;
         over.hidden = false;
-        weaponBtn.hidden = true;
+        showTouchButtons(false);
         renderTexts();
       }, 1200);
     }

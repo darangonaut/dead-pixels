@@ -813,19 +813,38 @@ export function drawPlayer(frame: number, weapon: WeaponId): PixelCanvas {
     return dome(jacket, nx, ny, 1.25, 0.72);
   });
   // Ruky: rukávy k zbrani.
-  const len = weapon === 'shotgun' ? 16 : weapon === 'smg' ? 13 : weapon === 'flamer' ? 14 : 8;
+  const len =
+    weapon === 'shotgun'
+      ? 16
+      : weapon === 'smg'
+        ? 13
+        : weapon === 'flamer'
+          ? 14
+          : weapon === 'crowbar'
+            ? 13
+            : 8;
   const sleeve = (_t: number, side: number) =>
     side > 0.35 ? shade(jacket, 0.72) : side < -0.35 ? shade(jacket, 1.2) : jacket;
-  const twoHanded = weapon !== 'pistol';
+  const twoHanded = weapon !== 'pistol' && weapon !== 'crowbar';
   line(pc, cx + 1, cy - 8, cx + 9, cy - 1.5, 3.4, sleeve);
   line(pc, cx + 1, cy + 8, twoHanded ? cx + 13 : cx + 9, cy + 1.5, 3.4, sleeve);
   // Zbraň (pozdĺž +x).
   const gx = cx + 8;
   const gun = 0x1a1c22;
   if (weapon === 'flamer') line(pc, cx - 4, cy + 4, gx + 3, cy + 3, 1.4, 0x2a2a2a); // hadica
-  pc.fillRect(gx, cy - 1, len + 2, 3, gun);
-  pc.fillRect(gx, cy - 1, len + 2, 1, 0x3a3e48);
-  pc.set(gx + len + 1, cy, 0x050506);
+  if (weapon === 'crowbar') {
+    // Pajcer: červená oceľová tyč so zahnutým koncom, odretá na hranách.
+    pc.fillRect(gx, cy - 2, len, 2, 0x9a2a22);
+    pc.fillRect(gx, cy - 2, len, 1, 0xc84a3a);
+    pc.fillRect(gx + 2, cy - 2, 2, 1, 0x8b93a1);
+    pc.fillRect(gx + len - 1, cy - 4, 2, 3, 0x9a2a22);
+    pc.set(gx + len, cy - 4, 0xc8ccd4);
+    pc.set(gx - 1, cy - 1, 0xc8ccd4);
+  } else {
+    pc.fillRect(gx, cy - 1, len + 2, 3, gun);
+    pc.fillRect(gx, cy - 1, len + 2, 1, 0x3a3e48);
+    pc.set(gx + len + 1, cy, 0x050506);
+  }
   if (weapon === 'shotgun') {
     pc.fillRect(gx - 3, cy - 1, 5, 3, 0x6a4428); // pažba
     pc.fillRect(gx + 7, cy - 2, 5, 5, 0x553923); // pumpa
@@ -1088,11 +1107,27 @@ export function drawCorpse(kind: ZombieKind): PixelCanvas {
 // --- Predmety ---
 
 export function drawPickup(
-  kind: 'ammo' | 'health' | 'weapon' | 'cash' | 'grenade',
+  kind: 'ammo' | 'health' | 'weapon' | 'cash' | 'grenade' | 'battery',
   weapon?: WeaponId,
 ): PixelCanvas {
   const pc = new PixelCanvas(24, 24);
-  if (kind === 'cash') {
+  if (kind === 'battery') {
+    // Dve monočlánkové batérie: čierne telo, medený pruh a kovový pól.
+    for (const [x0, y0] of [
+      [3, 5],
+      [6, 13],
+    ] as const) {
+      pc.fillRect(x0, y0, 14, 7, 0x1e2026);
+      pc.fillRect(x0, y0, 14, 1, 0x4a4e58);
+      pc.fillRect(x0 + 9, y0, 5, 7, 0xc8781e);
+      pc.fillRect(x0 + 9, y0, 5, 1, 0xf0a840);
+      pc.fillRect(x0 + 14, y0 + 2, 2, 3, 0xa8aeb8);
+      pc.set(x0 + 14, y0 + 2, 0xe0e4ea);
+      pc.fillRect(x0 + 3, y0 + 3, 3, 1, 0x8ac87a); // +
+      pc.set(x0 + 4, y0 + 2, 0x8ac87a);
+      pc.set(x0 + 4, y0 + 4, 0x8ac87a);
+    }
+  } else if (kind === 'cash') {
     // Zväzok bankoviek s páskou.
     pc.fillRect(2, 7, 20, 11, 0x2e5a2a);
     pc.fillRect(3, 5, 20, 11, 0x3e7a3a);

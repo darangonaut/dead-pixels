@@ -84,7 +84,7 @@ export interface Room {
   doorOut: number | null;
   /** Zombie, ktoré sa v úseku túlajú od začiatku. */
   roamers: { kind: SpawnKind; x: number; y: number }[];
-  loot: { kind: 'ammo' | 'health' | 'cash' | 'grenade'; x: number; y: number }[];
+  loot: { kind: 'ammo' | 'health' | 'cash' | 'grenade' | 'battery'; x: number; y: number }[];
 }
 
 export interface Gate {
@@ -661,7 +661,10 @@ export function generateLevel(seed: number, level = 1): CityMap {
     const lootCount = room.encounter === 'calm' ? 3 : room.encounter === 'roam' ? 1 : 0;
     for (let i = 0; i < lootCount; i++) {
       const at = freeTile(room, 3);
-      if (at) room.loot.push({ kind: rng() < 0.6 ? 'ammo' : 'health', ...at });
+      if (!at) continue;
+      // Jedno číslo z generátora ako predtým (zvyšok mapy sa nezmení).
+      const roll = rng();
+      room.loot.push({ kind: roll < 0.45 ? 'ammo' : roll < 0.62 ? 'battery' : 'health', ...at });
     }
     // Peniaze (obchod) a občas granáty.
     const cashCount = room.encounter === 'calm' ? 2 : room.encounter === 'roam' ? 1 : 0;

@@ -16,7 +16,7 @@ const idle: Input = {
 
 const baseCarry = (): Carry => ({
   weapon: 'pistol',
-  ammo: { pistol: Infinity, shotgun: 0, smg: 0, flamer: 0 },
+  ammo: { crowbar: Infinity, pistol: Infinity, shotgun: 0, smg: 0, flamer: 0 },
   owned: ['pistol'],
   score: 0,
   kills: 0,

@@ -18,6 +18,8 @@ export class Controls {
   private wheel = 0;
   private select: number | null = null;
   private grenade = false;
+  private light = false;
+  private focus = false;
   private move: Stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
   private aim: Stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
   private lastAim = 0;
@@ -41,8 +43,10 @@ export class Controls {
     };
     on(window, 'keydown', (e) => {
       this.keys.add(e.key.toLowerCase());
-      if (e.key >= '1' && e.key <= '4') this.select = Number(e.key) - 1;
+      if (e.key >= '1' && e.key <= '5') this.select = Number(e.key) - 1;
       if (e.key.toLowerCase() === 'g') this.grenade = true;
+      if (e.key.toLowerCase() === 'f' && !e.repeat) this.light = true;
+      if (e.key.toLowerCase() === 'v' && !e.repeat) this.focus = true;
       if (e.key.toLowerCase() === 'q') this.wheel = -1;
       if (e.key.toLowerCase() === 'e') this.wheel = 1;
     });
@@ -55,8 +59,12 @@ export class Controls {
       if (e.pointerType === 'touch') return this.touchStart(e);
       this.mouse.active = true;
       if (e.button === 0) this.mouse.down = true;
-      // Pravé tlačidlo: granát tam, kam mieri myš.
+      // Pravé tlačidlo: granát tam, kam mieri myš; stredné: sústredený lúč.
       if (e.button === 2) this.grenade = true;
+      if (e.button === 1) {
+        e.preventDefault();
+        this.focus = true;
+      }
       this.mouse.x = e.clientX;
       this.mouse.y = e.clientY;
     });
@@ -144,10 +152,13 @@ export class Controls {
     let aim: number | null = null;
     let firing = false;
     let throwDistance: number | null = null;
+    let sneak = false;
     if (this.touchMode) {
       const m = this.deflection(this.move);
       moveX = m.x;
       moveY = m.y;
+      // Jemné vychýlenie páčky = plíženie.
+      sneak = m.amount > 0 && m.amount < 0.55;
       const a = this.deflection(this.aim);
       if (a.amount > 0.2) {
         aim = Math.atan2(a.y, a.x);
@@ -163,6 +174,7 @@ export class Controls {
     if (k.has('d') || k.has('arrowright')) moveX += 1;
     if (k.has('w') || k.has('arrowup')) moveY -= 1;
     if (k.has('s') || k.has('arrowdown')) moveY += 1;
+    if (k.has('shift')) sneak = true;
     if (this.mouse.active && !this.touchMode) {
       const target = toWorld(this.mouse.x, this.mouse.y);
       aim = Math.atan2(target.y - player.y, target.x - player.x);
@@ -178,10 +190,15 @@ export class Controls {
       selectWeapon: this.select,
       throwGrenade: this.grenade,
       throwDistance,
+      sneak,
+      toggleLight: this.light,
+      focus: this.focus,
     };
     this.wheel = 0;
     this.select = null;
     this.grenade = false;
+    this.light = false;
+    this.focus = false;
     return input;
   }
 
@@ -198,6 +215,16 @@ export class Controls {
   /** Dotykové tlačidlo granátu. */
   requestGrenade(): void {
     this.grenade = true;
+  }
+
+  /** Dotykové tlačidlo baterky. */
+  toggleLight(): void {
+    this.light = true;
+  }
+
+  /** Dotykové tlačidlo sústredeného lúča. */
+  requestFocus(): void {
+    this.focus = true;
   }
 
   /** Dotykové tlačidlo zbrane. */

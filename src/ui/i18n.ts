@@ -6,8 +6,9 @@ const sk = {
   again: 'Znova',
   best: 'Najlepšie skóre',
   controlsDesktop:
-    'WASD pohyb · myš mieri a strieľa · G / pravé tlačidlo granát · 1–4 / koliesko zbraň',
-  controlsTouch: 'Ľavý palec pohyb · pravý palec mieri a strieľa · 💣 granát',
+    'WASD pohyb · Shift plíženie · myš mieri a strieľa · G / pravé tlačidlo granát · 1–5 / koliesko zbraň · F baterka · V oslepiť',
+  controlsTouch:
+    'Ľavý palec pohyb (jemne = plíženie) · pravý palec mieri a strieľa · 💣 granát · 🔦 baterka · ✦ oslepiť',
   level: 'Úroveň {n}',
   districtCity: 'Centrum mesta',
   districtHospital: 'Nemocnica sv. Anny',
@@ -68,6 +69,16 @@ const sk = {
   survivorCall: '„Pomoc! Tu hore, v okne!“',
   survivorGift: '„Chyť to! Viac toho nemám…“',
   survivorTrap: 'Pasca! Byt je plný zombie!',
+  crowbar: 'Pajcer',
+  itemBatteries: 'Batérie +45 % ({n} %)',
+  pickupBattery: '+ Batérie',
+  batteryLow: 'Baterka slabne — nájdi batérie alebo ju vypni (F)',
+  batteryLowTouch: 'Baterka slabne — nájdi batérie alebo ju vypni (🔦)',
+  hintStealth:
+    'Streľba je počuť ďaleko. Potichu: pajcer (1), plíženie (Shift), baterka vypnutá (F).',
+  hintStealthTouch:
+    'Streľba je počuť ďaleko. Potichu: pajcer (⇄), jemný pohyb páčkou, baterka vypnutá (🔦).',
+  takedown: 'Ticho zneškodnená',
 };
 
 type Key = keyof typeof sk;
@@ -78,8 +89,9 @@ const en: Record<Key, string> = {
   again: 'Again',
   best: 'Best score',
   controlsDesktop:
-    'WASD move · mouse aims and shoots · G / right click grenade · 1–4 / wheel weapon',
-  controlsTouch: 'Left thumb moves · right thumb aims and shoots · 💣 grenade',
+    'WASD move · Shift sneak · mouse aims and shoots · G / right click grenade · 1–5 / wheel weapon · F flashlight · V blind',
+  controlsTouch:
+    'Left thumb moves (gently = sneak) · right thumb aims and shoots · 💣 grenade · 🔦 flashlight · ✦ blind',
   level: 'Level {n}',
   districtCity: 'Downtown',
   districtHospital: "St. Anne's Hospital",
@@ -140,6 +152,15 @@ const en: Record<Key, string> = {
   survivorCall: '"Help! Up here, in the window!"',
   survivorGift: '"Catch! It\'s all I have…"',
   survivorTrap: 'A trap! The flat is full of zombies!',
+  crowbar: 'Crowbar',
+  itemBatteries: 'Batteries +45% ({n}%)',
+  pickupBattery: '+ Batteries',
+  batteryLow: 'Flashlight is dying — find batteries or switch it off (F)',
+  batteryLowTouch: 'Flashlight is dying — find batteries or switch it off (🔦)',
+  hintStealth: 'Gunfire carries far. Stay quiet: crowbar (1), sneak (Shift), flashlight off (F).',
+  hintStealthTouch:
+    'Gunfire carries far. Stay quiet: crowbar (⇄), gentle stick, flashlight off (🔦).',
+  takedown: 'Silent takedown',
 };
 
 const KEY = 'deadpixels.language';

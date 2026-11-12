@@ -1,4 +1,4 @@
-export type WeaponId = 'pistol' | 'shotgun' | 'smg' | 'flamer';
+export type WeaponId = 'crowbar' | 'pistol' | 'shotgun' | 'smg' | 'flamer';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -15,9 +15,27 @@ export interface WeaponDef {
   ammoPack: number;
   /** Zväčšenie záblesku (svetlo pri výstrele). */
   flash: number;
+  /**
+   * Hlasitosť (px): zombie bližšie ako polovica zbystria, ďalšie v dosahu prídu zvuk
+   * preskúmať.
+   */
+  noise: number;
 }
 
 export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
+  // Pajcer: tichý úder na blízko (oblúk pred hráčom), nič nespotrebuje.
+  crowbar: {
+    id: 'crowbar',
+    rate: 2.4,
+    pellets: 0,
+    spread: 1.7,
+    damage: 2,
+    range: 21,
+    knockback: 6,
+    ammoPack: Infinity,
+    flash: 0,
+    noise: 24,
+  },
   pistol: {
     id: 'pistol',
     rate: 4,
@@ -28,6 +46,7 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
     knockback: 3,
     ammoPack: Infinity,
     flash: 1,
+    noise: 150,
   },
   shotgun: {
     id: 'shotgun',
@@ -39,6 +58,7 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
     knockback: 7,
     ammoPack: 16,
     flash: 1.8,
+    noise: 280,
   },
   smg: {
     id: 'smg',
@@ -50,6 +70,7 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
     knockback: 1.5,
     ammoPack: 90,
     flash: 0.8,
+    noise: 210,
   },
   // Plameňomet: krátky kužeľ ohňa, zapáli zombie (palivo = náboje).
   flamer: {
@@ -62,7 +83,11 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
     knockback: 0,
     ammoPack: 120,
     flash: 0.6,
+    noise: 110,
   },
 };
 
-export const WEAPON_ORDER: readonly WeaponId[] = ['pistol', 'shotgun', 'smg', 'flamer'];
+export const WEAPON_ORDER: readonly WeaponId[] = ['crowbar', 'pistol', 'shotgun', 'smg', 'flamer'];
+
+/** Zbrane, ktoré má hráč vždy (s neobmedzenými nábojmi). */
+export const STARTING_WEAPONS: readonly WeaponId[] = ['pistol', 'crowbar'];

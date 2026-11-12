@@ -31,6 +31,7 @@ export function parseSave(text: string | null): SaveData | null {
     const carry: Carry = {
       weapon: c.weapon ?? 'pistol',
       ammo: {
+        crowbar: Infinity,
         pistol: Infinity,
         shotgun: c.ammo?.shotgun ?? 0,
         smg: c.ammo?.smg ?? 0,
@@ -43,6 +44,7 @@ export function parseSave(text: string | null): SaveData | null {
       cash: c.cash ?? 0,
       grenades: c.grenades ?? 2,
       upgrades: { ...NO_UPGRADES, ...c.upgrades },
+      battery: typeof c.battery === 'number' ? Math.max(0, Math.min(100, c.battery)) : 100,
     };
     return { version: 1, seed: raw.seed, level: raw.level, carry, savedAt: raw.savedAt ?? '' };
   } catch {

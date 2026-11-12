@@ -87,6 +87,37 @@ button.big {
   transition: width 0.15s;
 }
 
+.bat {
+  width: 160px;
+  height: 6px;
+  background: #1e1a10;
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 0 0 4px #3a3646;
+}
+
+.bat-fill {
+  height: 100%;
+  background: #e8c84a;
+  box-shadow: inset 0 2px 0 #f8e88a;
+  transition: width 0.3s;
+}
+
+.bat.off .bat-fill {
+  background: #6a6450;
+  box-shadow: none;
+}
+
+.bat.low .bat-fill {
+  animation: bat-blink 0.6s steps(2) infinite;
+}
+
+@keyframes bat-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .weapon {
   font-size: 16px;
   text-shadow: 2px 2px 0 var(--ink);
@@ -477,5 +508,33 @@ button.big {
 }
 
 #grenade-btn[hidden] {
+  display: none;
+}
+
+#light-btn,
+#focus-btn {
+  position: fixed;
+  bottom: max(84px, calc(env(safe-area-inset-bottom) + 68px));
+  width: 56px;
+  height: 56px;
+  font-size: 24px;
+}
+
+#light-btn {
+  right: max(16px, env(safe-area-inset-right));
+}
+
+#focus-btn {
+  right: max(84px, calc(env(safe-area-inset-right) + 72px));
+  color: #fff2b0;
+}
+
+#light-btn.off,
+#focus-btn.off {
+  opacity: 0.45;
+}
+
+#light-btn[hidden],
+#focus-btn[hidden] {
   display: none;
 }

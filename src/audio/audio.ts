@@ -298,6 +298,25 @@ export class Sound {
         case 'pickup':
           this.tone('square', 520, 880, 0.12, 0.12);
           break;
+        case 'swing':
+          // Švih vzduchom, pri zásahu tupý úder.
+          this.burst(0.09, 1400, 0.18, 1.5);
+          if (e.hit) this.tone('sine', 140, 50, 0.12, 0.35);
+          break;
+        case 'takedown':
+          this.tone('sine', 90, 40, 0.2, 0.4);
+          break;
+        case 'light':
+          this.tone('square', e.on ? 1400 : 900, e.on ? 1400 : 900, 0.02, 0.06);
+          break;
+        case 'focus':
+          this.tone('sine', 2200, 500, 0.28, 0.12);
+          this.burst(0.05, 5000, 0.12);
+          break;
+        case 'batteryLow':
+          this.tone('square', 660, 660, 0.06, 0.06);
+          setTimeout(() => this.tone('square', 520, 520, 0.08, 0.06), 120);
+          break;
         case 'horde':
           // Rev hordy: nízky hukot a šum.
           this.tone('sawtooth', 90, 45, 1.4, 0.25);

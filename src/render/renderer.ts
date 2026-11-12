@@ -8,10 +8,19 @@ import {
   Sprite,
   Texture,
 } from 'pixi.js';
-import type { Game, GameEvent, ZombieKind } from '@/game/game';
+import {
+  BATTERY_LOW,
+  FLASHLIGHT_RANGE,
+  FLASHLIGHT_SPREAD,
+  FOCUS_RANGE,
+  FOCUS_SPREAD,
+  type Game,
+  type GameEvent,
+  type ZombieKind,
+} from '@/game/game';
 import { Tile } from '@/game/map';
 import { visibilityFan } from '@/game/geometry';
-import type { WeaponId } from '@/game/weapons';
+import { WEAPON_ORDER, type WeaponId } from '@/game/weapons';
 import { PixelCanvas } from './PixelCanvas';
 import {
   C,
@@ -91,8 +100,6 @@ interface Tracer {
   age: number;
 }
 
-const FLASHLIGHT_RANGE = 200;
-const FLASHLIGHT_SPREAD = 0.95;
 const DARKNESS = 0.93;
 
 /** PixiJS zobrazenie hry: mesto, postavy, krv, tma so svetlami a efekty. */
@@ -107,6 +114,14 @@ export class Renderer {
   private effects = new Container();
   private glow = new Container();
   private tracerGfx = new Graphics();
+  /** Kruhy hluku (nad tmou — hráč vidí, kam až je počuť výstrel). */
+  private ringGfx = new Graphics();
+  private rings: { x: number; y: number; r: number; age: number }[] = [];
+  private beamGfx = new Graphics();
+  /** Švihy pajcerom (krátky oblúk). */
+  private swings: { x: number; y: number; angle: number; age: number }[] = [];
+  /** Slabá batéria: baterka občas na chvíľu vypadne (s). */
+  private dropout = 0;
   private darkFill = new Graphics();
   private lightGfx = new Graphics();
   /** Koreň pre svetlá: režim „erase“ musí mať dieťa, nie koreň vykresľovaný do textúry. */
@@ -187,7 +202,7 @@ export class Renderer {
       this.tex.corpse.set(kind, texture(drawCorpse(kind)));
       for (const f of [0, 1]) this.tex.zombie.set(`${kind}${f}`, texture(drawZombie(kind, f)));
     }
-    for (const w of ['pistol', 'shotgun', 'smg', 'flamer'] as const)
+    for (const w of WEAPON_ORDER)
       for (const f of [0, 1]) this.tex.player.set(`${w}${f}`, texture(drawPlayer(f, w)));
     this.tex.drop = texture(drawDot(C.blood));
     this.tex.spark = texture(drawDot(C.yellow, 1, 1));
@@ -265,6 +280,7 @@ export class Renderer {
       this.windowLayer.addChild(this.windowSprite);
     }
     this.lightGfx.blendMode = 'erase';
+    this.beamGfx.blendMode = 'add';
     this.lightRoot.addChild(this.lightGfx);
     this.flashRoot.addChild(this.lightSprites);
     // Brány (mreže): viditeľné, keď sú zatvorené.
@@ -336,7 +352,14 @@ export class Renderer {
       this.darkSprite = new Sprite(this.dark);
       // Mäkké okraje svetla.
       this.darkSprite.filters = [new BlurFilter({ strength: 3, quality: 2 })];
-      this.world.addChild(this.darkSprite, this.roofs, this.windowLayer, this.arrow);
+      this.world.addChild(
+        this.darkSprite,
+        this.roofs,
+        this.windowLayer,
+        this.beamGfx,
+        this.ringGfx,
+        this.arrow,
+      );
     }
   }
 
@@ -390,6 +413,25 @@ export class Renderer {
         }
         case 'hit':
           this.splatter(e.x, e.y, e.angle, 4, false);
+          break;
+        case 'noise':
+          this.rings.push({ x: e.x, y: e.y, r: e.radius, age: 0 });
+          break;
+        case 'swing':
+          this.swings.push({ x: e.x, y: e.y, angle: e.angle, age: 0 });
+          if (e.hit) this.shake = Math.max(this.shake, 1.5);
+          break;
+        case 'takedown':
+          this.shake = Math.max(this.shake, 2);
+          break;
+        case 'focus':
+          this.flashes.push({
+            x: e.x + Math.cos(e.angle) * 30,
+            y: e.y + Math.sin(e.angle) * 30,
+            size: 120,
+            age: 0,
+            life: 0.12,
+          });
           break;
         case 'explode': {
           this.flashes.push({ x: e.x, y: e.y, size: 180, age: 0, life: 0.25 });
@@ -711,6 +753,12 @@ export class Renderer {
         sprite.tint = 0xffb0b0;
         continue;
       }
+      if (z.blind > 0) {
+        // Oslepená: potáca sa a drží sa za oči.
+        sprite.rotation = z.angle + Math.sin(game.time * 9 + z.id) * 0.5;
+        sprite.tint = 0xfff0a0;
+        continue;
+      }
       sprite.tint =
         z.state === 'windup'
           ? 0xff7070
@@ -781,6 +829,38 @@ export class Renderer {
         .stroke({ width: 1, color: 0xfff2b0, alpha: Math.max(0, 0.9 - t.age * 15) });
     }
     this.tracers = this.tracers.filter((t) => t.age < 0.06);
+    // Švih pajcerom: oblúk pred hráčom.
+    for (const sw of this.swings) {
+      sw.age += dt;
+      const k = sw.age / 0.12;
+      const from = sw.angle - 0.9 + k * 0.4;
+      g.arc(sw.x, sw.y, 12, from, from + 1.4).stroke({
+        width: 1.5,
+        color: 0xe8e4dc,
+        alpha: Math.max(0, 0.8 * (1 - k)),
+      });
+    }
+    this.swings = this.swings.filter((sw) => sw.age < 0.12);
+    // Hluk: kruh sa rozšíri na dosah zvuku a vybledne.
+    const rg = this.ringGfx.clear();
+    for (const ring of this.rings) {
+      ring.age += dt;
+      const k = Math.min(1, ring.age / 0.6);
+      rg.circle(ring.x, ring.y, ring.r * (0.25 + 0.75 * Math.sqrt(k))).stroke({
+        width: 1,
+        color: 0xfff2b0,
+        alpha: 0.3 * (1 - k) ** 2,
+      });
+    }
+    this.rings = this.rings.filter((ring) => ring.age < 0.6);
+    // Sústredený lúč: jasný pás svetla (nad tmou).
+    const bg = this.beamGfx.clear();
+    const p = this.game.player;
+    if (p.focus > 0) {
+      const range = FOCUS_RANGE * this.game.flashlightScale;
+      const pts = visibilityFan(this.game.map, p.x, p.y, range, p.angle, FOCUS_SPREAD, 24);
+      bg.poly(pts).fill({ color: 0xfff6d0, alpha: 0.35 * Math.min(1, p.focus / 0.15) });
+    }
   }
 
   /**
@@ -833,15 +913,42 @@ export class Renderer {
         visibilityFan(game.map, ex.x, ex.y, 60, 0, Math.PI * 2, 48),
         0.3 + 0.25 * Math.sin(time * 4),
       );
-    // Baterka: tri vrstvy kužeľa (mäkký okraj ďaleko), okolo hráča malý kruh.
-    for (const [range, alpha] of [
-      [FLASHLIGHT_RANGE * game.flashlightScale, 0.45],
-      [FLASHLIGHT_RANGE * game.flashlightScale * 0.7, 0.35],
-      [FLASHLIGHT_RANGE * game.flashlightScale * 0.42, 0.25],
-    ] as const) {
-      poly(visibilityFan(game.map, p.x, p.y, range, p.angle, FLASHLIGHT_SPREAD, 72), alpha);
+    // Baterka: tri vrstvy kužeľa (mäkký okraj ďaleko), okolo hráča malý kruh. Slabá batéria
+    // kužeľ skráti, zúži a občas na chvíľu vypadne.
+    const power = game.flashlightPower;
+    this.dropout = Math.max(0, this.dropout - dt);
+    if (power > 0 && p.battery < BATTERY_LOW && this.dropout <= 0 && Math.random() < dt * 0.8)
+      this.dropout = 0.05 + Math.random() * 0.15;
+    if (power > 0 && this.dropout <= 0) {
+      const reach = FLASHLIGHT_RANGE * game.flashlightScale * power;
+      const spread = FLASHLIGHT_SPREAD * (0.65 + 0.35 * power);
+      for (const [range, alpha] of [
+        [reach, 0.45],
+        [reach * 0.7, 0.35],
+        [reach * 0.42, 0.25],
+      ] as const) {
+        poly(visibilityFan(game.map, p.x, p.y, range, p.angle, spread, 72), alpha);
+      }
     }
-    poly(visibilityFan(game.map, p.x, p.y, 34, 0, Math.PI * 2, 48), 0.55);
+    // Sústredený lúč: úzky a ostrý, ďaleko.
+    if (p.focus > 0)
+      poly(
+        visibilityFan(
+          game.map,
+          p.x,
+          p.y,
+          FOCUS_RANGE * game.flashlightScale,
+          p.angle,
+          FOCUS_SPREAD,
+          32,
+        ),
+        0.9,
+      );
+    // Vypnutá baterka: oči si zvyknú len na najbližšie okolie.
+    poly(
+      visibilityFan(game.map, p.x, p.y, power > 0 ? 34 : 26, 0, Math.PI * 2, 48),
+      power > 0 ? 0.55 : 0.4,
+    );
     this.app.renderer.render({ container: this.lightRoot, target: this.dark, clear: false });
 
     // Záblesky výstrelov (mäkké kruhy bez tieňov).

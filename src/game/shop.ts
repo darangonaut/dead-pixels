@@ -26,9 +26,13 @@ const WEAPON_PRICE: Partial<Record<WeaponId, number>> = { shotgun: 150, smg: 220
 const AMMO_PRICE: Partial<Record<WeaponId, number>> = { shotgun: 40, smg: 45, flamer: 55 };
 const GRENADES_PRICE = 60;
 const GRENADES_PACK = 3;
+const BATTERIES_PRICE = 35;
 export const MAX_GRENADES = 9;
+/** Balík batérií (nájdený aj kúpený) dobije baterku o toľko percent. */
+export const BATTERY_PACK = 45;
 
-export type ShopItemId = `weapon:${WeaponId}` | `ammo:${WeaponId}` | 'grenades' | `up:${UpgradeId}`;
+export type ShopItemId =
+  `weapon:${WeaponId}` | `ammo:${WeaponId}` | 'grenades' | 'batteries' | `up:${UpgradeId}`;
 
 export interface ShopItem {
   id: ShopItemId;
@@ -61,6 +65,13 @@ export function shopItems(carry: Carry, level: number): ShopItem[] {
     available: carry.grenades < MAX_GRENADES,
     level: carry.grenades,
     max: MAX_GRENADES,
+  });
+  const battery = Math.round(carry.battery ?? 100);
+  items.push({
+    id: 'batteries',
+    cost: BATTERIES_PRICE,
+    available: battery < 100,
+    level: battery,
   });
   for (const id of Object.keys(UPGRADES) as UpgradeId[]) {
     const lvl = carry.upgrades[id];
@@ -98,6 +109,8 @@ export function buy(carry: Carry, level: number, id: ShopItemId): Carry | null {
     next.ammo[w] += WEAPONS[w].ammoPack;
   } else if (kind === 'grenades') {
     next.grenades = Math.min(MAX_GRENADES, next.grenades + GRENADES_PACK);
+  } else if (kind === 'batteries') {
+    next.battery = Math.min(100, (next.battery ?? 100) + BATTERY_PACK);
   } else {
     next.upgrades[what as UpgradeId]++;
   }

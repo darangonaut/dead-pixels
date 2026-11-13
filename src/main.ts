@@ -14,7 +14,18 @@ import {
   type DailySetup,
 } from './game/daily';
 import { parseSave, serializeSave, type SaveData } from './game/save';
-import { buy, shopItems, type ShopItem } from './game/shop';
+import {
+  buy,
+  damageFactor,
+  flashlightFactor,
+  maxHpFor,
+  shopItems,
+  speedFactor,
+  type ShopItem,
+  type ShopItemId,
+} from './game/shop';
+import type { WeaponId } from './game/weapons';
+import { drawHero, drawIcon, type IconId } from './render/hero';
 import { Controls } from './input/input';
 import { Renderer } from './render/renderer';
 import { getLanguage, setLanguage, t, type Language } from './ui/i18n';
@@ -370,20 +381,93 @@ function finishDaily(g: Game, done: boolean): void {
 let shopCarry: Carry | null = null;
 let shopLevel = 1;
 
-function itemLabel(item: ShopItem): string {
+const UPGRADE_TEXT = {
+  damage: ['shopDamageName', 'shopDamageDesc'],
+  flashlight: ['shopFlashlightName', 'shopFlashlightDesc'],
+  health: ['shopHealthName', 'shopHealthDesc'],
+  speed: ['shopSpeedName', 'shopSpeedDesc'],
+} as const;
+
+/** Názov a popis položky obchodu. */
+function itemText(item: ShopItem): { name: string; desc: string } {
   const [kind, what] = item.id.split(':') as [string, string | undefined];
-  const params = { l: item.level ?? 0, max: item.max ?? 0, n: item.level ?? 0 };
-  if (kind === 'weapon') return t('itemWeapon', { weapon: t(what as 'shotgun') });
-  if (kind === 'ammo') return t('itemAmmo', { weapon: t(what as 'shotgun'), n: item.level ?? 0 });
-  if (kind === 'grenades') return t('itemGrenades', params);
-  if (kind === 'batteries') return t('itemBatteries', params);
-  const key = {
-    damage: 'itemDamage',
-    flashlight: 'itemFlashlight',
-    health: 'itemHealth',
-    speed: 'itemSpeed',
-  } as const;
-  return t(key[what as keyof typeof key], params);
+  if (kind === 'weapon') return { name: t(what as WeaponId), desc: t('shopWeaponDesc') };
+  if (kind === 'ammo')
+    return {
+      name: t('shopAmmoName', { weapon: t(what as WeaponId) }),
+      desc: t('shopAmmoDesc', { n: item.level ?? 0 }),
+    };
+  if (kind === 'grenades')
+    return {
+      name: t('shopGrenadesName'),
+      desc: t('shopGrenadesDesc', { n: item.level ?? 0, max: item.max ?? 0 }),
+    };
+  if (kind === 'batteries')
+    return { name: t('shopBatteriesName'), desc: t('shopBatteriesDesc', { n: item.level ?? 0 }) };
+  const [name, desc] = UPGRADE_TEXT[what as keyof typeof UPGRADE_TEXT];
+  return { name: t(name), desc: t(desc) };
+}
+
+/** Pixel art na plátno v DOM (ostré pixely zväčší CSS). */
+function paint(
+  canvas: HTMLCanvasElement,
+  pc: { toCanvas(): HTMLCanvasElement; width: number; height: number },
+): void {
+  canvas.width = pc.width;
+  canvas.height = pc.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, pc.width, pc.height);
+  ctx.drawImage(pc.toCanvas(), 0, 0);
+}
+
+const iconCache = new Map<string, HTMLCanvasElement>();
+function icon(id: IconId): HTMLCanvasElement {
+  let src = iconCache.get(id);
+  if (!src) {
+    src = drawIcon(id).toCanvas();
+    iconCache.set(id, src);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.className = 'icon';
+  canvas.width = src.width;
+  canvas.height = src.height;
+  canvas.getContext('2d')!.drawImage(src, 0, 0);
+  return canvas;
+}
+
+/**
+ * Hrdina a jeho parametre; s `preview` ukáže, ako bude vyzerať po kúpe položky
+ * (zmenené hodnoty zvýraznené).
+ */
+function renderOutfit(preview: ShopItemId | null): void {
+  if (!shopCarry) return;
+  const carry = shopCarry;
+  const look = (preview && buy({ ...carry, cash: 1e9 }, shopLevel, preview)) || carry;
+  const hero = $<HTMLCanvasElement>('.hero');
+  paint(hero, drawHero(look));
+  hero.classList.toggle('preview', look !== carry);
+  const rows: [string, (c: Carry) => string][] = [
+    [t('statHealth'), (c) => String(maxHpFor(c.upgrades))],
+    [t('statBattery'), (c) => `${Math.round(c.battery ?? 100)} %`],
+    [t('statDamage'), (c) => `+${Math.round((damageFactor(c.upgrades) - 1) * 100)} %`],
+    [t('statLight'), (c) => `+${Math.round((flashlightFactor(c.upgrades) - 1) * 100)} %`],
+    [t('statSpeed'), (c) => `+${Math.round((speedFactor(c.upgrades) - 1) * 100)} %`],
+    [t('statGrenades'), (c) => String(c.grenades)],
+  ];
+  const stats = $('.hero-stats');
+  stats.innerHTML = '';
+  for (const [label, value] of rows) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = label;
+    const now = value(carry);
+    const next = value(look);
+    const val = document.createElement('span');
+    val.textContent = now === next ? now : `${now} → ${next}`;
+    li.classList.toggle('up', now !== next);
+    li.append(name, val);
+    stats.appendChild(li);
+  }
 }
 
 function renderShop(): void {
@@ -394,14 +478,36 @@ function renderShop(): void {
   shop.innerHTML = '';
   for (const item of shopItems(carry, shopLevel)) {
     const button = document.createElement('button');
-    button.disabled = !item.available || carry.cash < item.cost;
+    button.className = 'item';
+    const affordable = carry.cash >= item.cost;
+    button.disabled = !item.available || !affordable;
+    button.classList.toggle('maxed', !item.available);
     button.dataset.item = item.id;
+    const text = itemText(item);
+    const info = document.createElement('span');
+    info.className = 'info';
     const name = document.createElement('span');
-    name.textContent = itemLabel(item);
+    name.className = 'name';
+    name.textContent = text.name;
+    const desc = document.createElement('span');
+    desc.className = 'desc';
+    desc.textContent = text.desc;
+    info.append(name, desc);
+    // Úroveň vylepšenia ako dieliky.
+    if (item.id.startsWith('up:') && item.max) {
+      const pips = document.createElement('span');
+      pips.className = 'pips';
+      for (let i = 0; i < item.max; i++) {
+        const pip = document.createElement('i');
+        if (i < (item.level ?? 0)) pip.className = 'on';
+        pips.appendChild(pip);
+      }
+      info.appendChild(pips);
+    }
     const price = document.createElement('span');
     price.className = 'price';
-    price.textContent = item.available ? `${item.cost} $` : '✓';
-    button.append(name, price);
+    price.textContent = item.available ? `${item.cost} $` : t('shopMax');
+    button.append(icon(item.id as IconId), info, price);
     button.addEventListener('click', () => {
       const next = buy(carry, shopLevel, item.id);
       if (!next) return;
@@ -409,8 +515,22 @@ function renderShop(): void {
       sound.play([{ type: 'pickup', kind: 'cash' }], { x: 0, y: 0 });
       renderShop();
     });
+    // Náhľad: prejdenie myšou / zameranie ukáže hrdinu po kúpe.
+    if (item.available) {
+      button.addEventListener('pointerenter', () => renderOutfit(item.id));
+      button.addEventListener('focus', () => renderOutfit(item.id));
+      button.addEventListener('pointerleave', () => renderOutfit(null));
+      button.addEventListener('blur', () => renderOutfit(null));
+    }
+    // Kúpiť sa nedá, ale náhľad áno (aj nedostupné pre peniaze).
+    if (item.available && !affordable) {
+      button.disabled = false;
+      button.classList.add('poor');
+      button.setAttribute('aria-disabled', 'true');
+    }
     shop.appendChild(button);
   }
+  renderOutfit(null);
 }
 
 $('.next').addEventListener('click', () => {
@@ -606,6 +726,8 @@ function react(events: GameEvent[], g: Game): void {
         $('.done-summary').textContent = t('levelSummary', { kills: g.kills, score: g.score });
         shopCarry = g.carry();
         shopLevel = g.level + 1;
+        banner.classList.remove('show');
+        toast.classList.remove('show');
         renderShop();
         done.hidden = false;
         showTouchButtons(false);

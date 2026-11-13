@@ -56,8 +56,11 @@ Nasadenie na GitHub Pages: `npm run deploy:pages` (vetva `gh-pages`).
 - Zbrane: pajcer a pištoľ (oboje bez nábojov), brokovnica, samopal a plameňomet (zapáli zombie).
   Granáty (G / pravé tlačidlo, na mobile 💣) a červené výbušné sudy — výbuch zraní hordu
   a reťazovo odpáli ďalšie sudy.
-- Obchod po každej úrovni: za peniaze zo zombie a z úsekov kúpiš zbrane, náboje, granáty
-  a vylepšenia (sila zbraní, baterka, zdravie, rýchlosť).
+- Obchod po každej úrovni: za peniaze zo zombie a z úsekov kúpiš zbrane, náboje, granáty,
+  batérie a vylepšenia (sila zbraní, baterka, vesta, topánky). Vľavo stojí hrdina celý
+  spredu a výbava je na ňom vidieť — vesta a prilba, bežecké topánky, nábojový pás, väčšia
+  baterka s ukazovateľom batérie, zbraň v ruke a ďalšie na chrbte, granáty na opasku.
+  Prejdením na položku uvidíš náhľad, ako sa zmení, aj o koľko stúpnu jeho parametre.
 - Postup sa ukladá na začiatku každej úrovne — na úvodnej obrazovke **Pokračovať**.
 - Dynamická hudba: pokojný ambient, pri horde bicie, pri bossovi ešte rýchlejšie.
 - Štvrte: úrovne 1–3 centrum mesta, 4–6 nemocnica (oddelenia, hala, chodby, sanitky),

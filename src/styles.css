@@ -494,33 +494,230 @@ button.big {
   color: #9ad07a;
 }
 
-.shop {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 10px;
-  width: min(820px, 94vw);
-  max-height: 46vh;
-  overflow-y: auto;
-  padding: 4px;
+.outfit {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  width: min(940px, 96vw);
+  max-height: 64vh;
+  min-height: 0;
 }
 
-.shop button {
+.hero-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 18px;
+  background: radial-gradient(ellipse at 50% 62%, #34304a 0%, #1a1824 55%, #110f18 100%);
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 0 0 4px #3a3646;
+}
+
+.hero {
+  height: min(40vh, 312px);
+  aspect-ratio: 72 / 104;
+  image-rendering: pixelated;
+  animation: breathe 1.8s steps(2) infinite;
+  transition: filter 0.15s;
+}
+
+.hero.preview {
+  filter: drop-shadow(0 0 6px rgb(255 211 78 / 60%));
+}
+
+@keyframes breathe {
+  50% {
+    transform: translateY(-1.5%);
+  }
+}
+
+.hero-stats {
+  width: 100%;
+  min-width: 180px;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 13px;
+  list-style: none;
+}
+
+.hero-stats li {
   display: flex;
   justify-content: space-between;
+  gap: 16px;
+  padding: 2px 0;
+  border-bottom: 1px solid #2a2636;
+}
+
+.hero-stats li.up {
+  color: #ffd34e;
+}
+
+.shop-side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
-  font-size: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.shop {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-auto-rows: min-content;
+  gap: 10px;
+  min-height: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.shop .item {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
   text-align: left;
 }
 
-.shop button .price {
+.shop .icon {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+  background: #14121c;
+  box-shadow: inset 0 0 0 2px #2a2636;
+}
+
+.shop .info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.shop .name {
+  font-size: 14px;
+}
+
+.shop .desc {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.shop .pips {
+  display: flex;
+  gap: 3px;
+}
+
+.shop .pips i {
+  width: 12px;
+  height: 5px;
+  background: #2a2636;
+}
+
+.shop .pips i.on {
+  background: #ffd34e;
+  box-shadow: inset 0 1px 0 #fff2b0;
+}
+
+.shop .price {
   color: #9ad07a;
   white-space: nowrap;
 }
 
-.shop button:disabled {
-  opacity: 0.4;
+.shop .item:hover:not(:disabled, .poor),
+.shop .item:focus-visible {
+  background: #262236;
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 0 0 4px #ffd34e;
+}
+
+.shop .item.poor {
   cursor: default;
+  opacity: 0.6;
+}
+
+.shop .item.poor .price {
+  color: var(--red);
+}
+
+.shop .item.maxed {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.shop .item.maxed .price {
+  color: #ffd34e;
+}
+
+/* Telefón na šírku: nízka obrazovka. */
+@media (max-height: 520px) {
+  #done {
+    gap: 6px;
+    padding: 10px 16px;
+  }
+
+  .done-title {
+    font-size: 24px;
+  }
+
+  .done-summary,
+  .done-cash {
+    font-size: 14px;
+  }
+
+  .outfit {
+    max-height: 72vh;
+  }
+
+  .hero-panel {
+    padding: 6px 10px;
+  }
+
+  .hero {
+    height: 36vh;
+  }
+
+  .hero-stats {
+    min-width: 130px;
+    margin-top: 4px;
+    font-size: 10px;
+  }
+
+  .hero-stats li {
+    padding: 0;
+  }
+
+  .shop {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 8px;
+  }
+
+  #done .next {
+    padding: 6px 24px;
+    font-size: 18px;
+  }
+}
+
+/* Úzka obrazovka na výšku: hrdina nad obchodom. */
+@media (max-width: 600px) and (min-height: 521px) {
+  .outfit {
+    flex-direction: column;
+    max-height: 70vh;
+  }
+
+  .hero-panel {
+    flex-direction: row;
+    gap: 14px;
+  }
+
+  .hero {
+    height: 22vh;
+  }
 }
 
 .continue[hidden] {
